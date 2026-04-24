@@ -7,6 +7,7 @@
     <depends>com.intellij.modules.platform</depends>
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="SignalCodeNotifications" displayType="BALLOON" isLogByDefault="true"/>
+        <postStartupActivity implementation="com.signalcode.mvp.IdeTelemetryStartupActivity"/>
     </extensions>
 
     <actions>

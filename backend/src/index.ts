@@ -1,12 +1,20 @@
 import "dotenv/config";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
-import { db, initializeDb } from "./db.js";
+import { db, initializeDb, resetTelemetryDb } from "./db.js";
 import { generateSearchReplace } from "./litellm.js";
 import { defaultModel as generatedDefaultModel, supportedModels } from "./modelCatalog.generated.js";
 import { generateRequestSchema, telemetryRequestSchema } from "./schemas.js";
-import type { GenerateResponse, RecentActivityRow, StatsResponse, TelemetryRequest } from "./types.js";
+import type {
+  GenerateResponse,
+  IdeActivityResponse,
+  IdeMonitorEvent,
+  RecentActivityRow,
+  StatsResponse,
+  TelemetryRequest
+} from "./types.js";
 
 const port = Number(process.env.PORT ?? 3001);
 const configuredModel = process.env.LITELLM_MODEL;
@@ -102,6 +110,14 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
   const body: TelemetryRequest = parsed.data;
   const timestamp = body.timestamp ?? new Date().toISOString();
   try {
+    const source = typeof body.meta?.source === "string" ? body.meta.source : null;
+    if (source === "ide-monitor") {
+      db.prepare(
+        `INSERT OR IGNORE INTO tasks (task_id, prompt_snippet, model, status, created_at)
+         VALUES (?, ?, ?, 'SUCCEEDED', ?)`
+      ).run(body.task_id, "IDE monitor event", "ide-monitor", timestamp);
+    }
+
     const result = db.prepare(
       `INSERT OR IGNORE INTO events (task_id, diff_id, type, metadata, created_at)
        VALUES (?, ?, ?, ?, ?)`
@@ -207,10 +223,123 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
     res.json(response);
   });
 
+  app.get("/api/ide/activity", (_req, res) => {
+    const rows = db
+      .prepare(
+        `SELECT metadata, created_at
+         FROM events
+         ORDER BY created_at DESC
+         LIMIT 100`
+      )
+      .all() as Array<{ metadata: string | null; created_at: string }>;
+
+    const monitorSignals = rows
+      .map((row) => ({
+        created_at: row.created_at,
+        meta: parseMeta(row.metadata)
+      }))
+      .filter((row) => row.meta.source === "ide-monitor");
+
+    const fileSignals = monitorSignals.map((row) => ({
+      created_at: row.created_at,
+      meta: row.meta
+    }));
+
+    const currentFile = getMetaString(
+      fileSignals.find((row) => row.meta.activityType === "opened" && typeof row.meta.filePath === "string")?.meta,
+      "filePath"
+    );
+    const lastEditedFile = getMetaString(
+      fileSignals.find((row) => row.meta.activityType === "edited" && typeof row.meta.filePath === "string")?.meta,
+      "filePath"
+    );
+    const lastAddedFile = getMetaString(
+      fileSignals.find((row) => row.meta.activityType === "created" && typeof row.meta.filePath === "string")?.meta,
+      "filePath"
+    );
+
+    const lastHeartbeat =
+      fileSignals.find((row) => row.meta.activityType === "heartbeat")?.created_at ?? fileSignals[0]?.created_at ?? null;
+    const ideConnected = isTimestampFresh(lastHeartbeat, 45_000);
+
+    const response: IdeActivityResponse = {
+      ideConnected,
+      lastEventAt: fileSignals[0]?.created_at ?? null,
+      currentFile,
+      lastEditedFile,
+      lastAddedFile
+    };
+
+    res.json(response);
+  });
+
+  app.post("/api/admin/reset-telemetry", (_req, res) => {
+    try {
+      resetTelemetryDb();
+      res.status(200).json({ ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown DB error";
+      // eslint-disable-next-line no-console
+      console.error("[/api/admin/reset-telemetry]", message);
+      res.status(500).json({ ok: false, error: "Failed to reset telemetry", message });
+    }
+  });
+
+  app.get("/api/ide/events", (_req, res) => {
+    const rows = db
+      .prepare(
+        `SELECT metadata, created_at
+         FROM events
+         ORDER BY created_at DESC
+         LIMIT 250`
+      )
+      .all() as Array<{ metadata: string | null; created_at: string }>;
+
+    const events: IdeMonitorEvent[] = rows
+      .map((row) => ({
+        timestamp: row.created_at,
+        meta: parseMeta(row.metadata)
+      }))
+      .filter((row) => row.meta.source === "ide-monitor")
+      .slice(0, 10)
+      .map((row) => ({
+        timestamp: row.timestamp,
+        activityType: getMetaString(row.meta, "activityType") ?? "unknown",
+        filePath: getMetaString(row.meta, "filePath"),
+        languageId: getMetaString(row.meta, "languageId")
+      }));
+
+    res.json({ events });
+  });
+
   return app;
 }
 
-if (process.env.NODE_ENV !== "test") {
+function parseMeta(metadata: string | null): Record<string, unknown> {
+  if (!metadata) return {};
+  try {
+    return JSON.parse(metadata) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function getMetaString(meta: Record<string, unknown> | undefined, key: string): string | null {
+  if (!meta) return null;
+  const value = meta[key];
+  return typeof value === "string" ? value : null;
+}
+
+function isTimestampFresh(timestamp: string | null, ttlMs: number): boolean {
+  if (!timestamp) return false;
+  const millis = new Date(timestamp).getTime();
+  if (Number.isNaN(millis)) return false;
+  return Date.now() - millis <= ttlMs;
+}
+
+const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
+
+if (process.env.NODE_ENV !== "test" && isDirectRun) {
   createApp().listen(port, () => {
     // eslint-disable-next-line no-console
     console.log(`Backend listening on http://localhost:${port}`);

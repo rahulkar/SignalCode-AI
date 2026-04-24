@@ -1,3 +1,48 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    @apply m-0 bg-slate-950 text-slate-100 antialiased;
+    font-family:
+      Inter,
+      "Segoe UI",
+      Roboto,
+      "Helvetica Neue",
+      Arial,
+      sans-serif;
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950;
+  }
+
+  .card {
+    @apply rounded-xl border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/30;
+  }
+
+  .card-title {
+    @apply mb-3 text-lg font-semibold text-white;
+  }
+
+  .control-row {
+    @apply flex flex-col gap-1 text-sm text-slate-300;
+  }
+
+  .control-input {
+    @apply rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none ring-brand-500 transition focus:ring-2;
+  }
+
+  .btn-primary {
+    @apply rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-500;
+  }
+}

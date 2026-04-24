@@ -29,7 +29,8 @@ data class GenerateResponse(
 data class TelemetryRequest(
     val task_id: String,
     val diff_id: String,
-    val event: TelemetryEventType
+    val event: TelemetryEventType,
+    val meta: Map<String, Any>? = null
 )
 
 data class SearchReplaceDiff(

@@ -41,3 +41,7 @@ export function initializeDb(): void {
     `);
   }
 }
+
+export function resetTelemetryDb(): void {
+  db.exec("DELETE FROM events; DELETE FROM tasks;");
+}

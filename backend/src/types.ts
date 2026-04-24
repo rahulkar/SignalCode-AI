@@ -57,3 +57,18 @@ export interface StatsResponse {
   timeSeries: TimeSeriesPoint[];
   recentActivity: RecentActivityRow[];
 }
+
+export interface IdeActivityResponse {
+  ideConnected: boolean;
+  lastEventAt: string | null;
+  currentFile: string | null;
+  lastEditedFile: string | null;
+  lastAddedFile: string | null;
+}
+
+export interface IdeMonitorEvent {
+  timestamp: string;
+  activityType: string;
+  filePath: string | null;
+  languageId: string | null;
+}

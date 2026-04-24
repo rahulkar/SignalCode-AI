@@ -1,11 +1,11 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
-import { db } from "./db.js";
+import { db, resetTelemetryDb } from "./db.js";
 import { createApp } from "./index.js";
 
 function clearDb(): void {
-  db.exec("DELETE FROM events; DELETE FROM tasks;");
+  resetTelemetryDb();
 }
 
 describe("backend integrity behaviors", () => {
@@ -100,5 +100,58 @@ describe("backend integrity behaviors", () => {
     const statsResponse = await request(app).get("/api/stats");
     assert.equal(statsResponse.status, 200);
     assert.equal(statsResponse.body.totals.accepted, 1);
+  });
+
+  it("returns ide activity summary and clears telemetry from admin endpoint", async () => {
+    const app = createApp();
+    const taskId = "ide-monitor-test";
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "diff-opened",
+      event: "DIFF_RENDERED",
+      meta: { source: "ide-monitor", activityType: "opened", filePath: "/tmp/file.ts" }
+    });
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "diff-edited",
+      event: "DIFF_RENDERED",
+      meta: { source: "ide-monitor", activityType: "edited", filePath: "/tmp/file.ts" }
+    });
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "diff-created",
+      event: "DIFF_RENDERED",
+      meta: { source: "ide-monitor", activityType: "created", filePath: "/tmp/new-file.ts" }
+    });
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "diff-heartbeat",
+      event: "DIFF_RENDERED",
+      meta: { source: "ide-monitor", activityType: "heartbeat" }
+    });
+
+    const ideActivity = await request(app).get("/api/ide/activity");
+    assert.equal(ideActivity.status, 200);
+    assert.equal(ideActivity.body.ideConnected, true);
+    assert.equal(ideActivity.body.currentFile, "/tmp/file.ts");
+    assert.equal(ideActivity.body.lastEditedFile, "/tmp/file.ts");
+    assert.equal(ideActivity.body.lastAddedFile, "/tmp/new-file.ts");
+
+    const ideEvents = await request(app).get("/api/ide/events");
+    assert.equal(ideEvents.status, 200);
+    assert.ok(Array.isArray(ideEvents.body.events));
+    assert.ok(ideEvents.body.events.length > 0);
+    assert.equal(ideEvents.body.events[0].activityType, "heartbeat");
+
+    const reset = await request(app).post("/api/admin/reset-telemetry").send({});
+    assert.equal(reset.status, 200);
+    assert.equal(reset.body.ok, true);
+
+    const countRow = db.prepare("SELECT COUNT(*) as count FROM events").get() as { count: number };
+    assert.equal(countRow.count, 0);
   });
 });

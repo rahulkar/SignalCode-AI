@@ -257,7 +257,8 @@ class SignalCodeInlineAction : AnAction() {
                         TelemetryRequest(
                             task_id = previous.taskId,
                             diff_id = previous.diffId,
-                            event = TelemetryEventType.ITERATED
+                            event = TelemetryEventType.ITERATED,
+                            meta = previous.meta + mapOf("fileAction" to "edited")
                         )
                     )
                 }
@@ -300,7 +301,14 @@ class SignalCodeInlineAction : AnAction() {
                         notify(project, "Could not locate SEARCH block in document.", NotificationType.WARNING)
                         return@invokeLater
                     }
-                    activeDiff = ActiveDiff(response.task_id, response.diff_id, parsed.search, parsed.replace, session)
+                    activeDiff = ActiveDiff(
+                        response.task_id,
+                        response.diff_id,
+                        parsed.search,
+                        parsed.replace,
+                        session,
+                        mapOf("filePath" to filePath, "languageId" to (languageId ?: "unknown"))
+                    )
                     showAcceptRejectPopup(project, editor, activeDiff!!)
                     scope.launch(Dispatchers.IO) {
                         runCatching {
@@ -308,7 +316,12 @@ class SignalCodeInlineAction : AnAction() {
                                 TelemetryRequest(
                                     task_id = response.task_id,
                                     diff_id = response.diff_id,
-                                    event = TelemetryEventType.DIFF_RENDERED
+                                    event = TelemetryEventType.DIFF_RENDERED,
+                                    meta = mapOf(
+                                        "filePath" to filePath,
+                                        "languageId" to (languageId ?: "unknown"),
+                                        "fileAction" to "opened"
+                                    )
                                 )
                             )
                         }
@@ -350,7 +363,12 @@ class SignalCodeInlineAction : AnAction() {
                 scope.launch(Dispatchers.IO) {
                     runCatching {
                         backendClient.telemetry(
-                            TelemetryRequest(diff.taskId, diff.diffId, TelemetryEventType.ACCEPTED)
+                            TelemetryRequest(
+                                diff.taskId,
+                                diff.diffId,
+                                TelemetryEventType.ACCEPTED,
+                                diff.meta + mapOf("fileAction" to "edited")
+                            )
                         )
                     }
                 }
@@ -368,7 +386,12 @@ class SignalCodeInlineAction : AnAction() {
             scope.launch(Dispatchers.IO) {
                 runCatching {
                     backendClient.telemetry(
-                        TelemetryRequest(diff.taskId, diff.diffId, TelemetryEventType.REJECTED)
+                        TelemetryRequest(
+                            diff.taskId,
+                            diff.diffId,
+                            TelemetryEventType.REJECTED,
+                            diff.meta + mapOf("fileAction" to "added")
+                        )
                     )
                 }
             }
@@ -430,5 +453,6 @@ private data class ActiveDiff(
     val diffId: String,
     val search: String,
     val replace: String,
-    val session: InlineDiffSession
+    val session: InlineDiffSession,
+    val meta: Map<String, Any>
 )
