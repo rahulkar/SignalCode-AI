@@ -19,6 +19,12 @@ interface LiteLlmResponse {
   }>;
 }
 
+interface LiteLlmModelsResponse {
+  data?: Array<{
+    id?: string;
+  }>;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -125,7 +131,29 @@ function normalizeSearchReplace(raw: string, hintSnippet: string): string | null
     return fallback;
   }
 
+  const cleaned = stripDiffNoise(text).trim();
+  if (isLikelyCode(cleaned) && hintSnippet.trim().length > 0) {
+    return `<<<<SEARCH\n${hintSnippet.trim()}\n====\n${cleaned}\n>>>>REPLACE`;
+  }
+
   return null;
+}
+
+function isLikelyCode(text: string): boolean {
+  if (text.length < 3) {
+    return false;
+  }
+  const signalPatterns = [
+    /[{};]/,
+    /\n/,
+    /\b(import|export|const|let|var|function|class|interface|type)\b/,
+    /@tailwind\b/,
+    /<\/?[a-zA-Z][^>]*>/,
+    /\breturn\b/
+  ];
+  const signalHits = signalPatterns.reduce((acc, pattern) => acc + (pattern.test(text) ? 1 : 0), 0);
+  const sentenceLike = /[.?!]\s+[A-Z]/.test(text);
+  return signalHits >= 2 && !sentenceLike;
 }
 
 export async function generateSearchReplace(params: {
@@ -214,4 +242,34 @@ ${params.prompt}`
     throw new Error(`Model did not return valid SEARCH/REPLACE block. Raw response: ${content}`);
   }
   return normalized;
+}
+
+export async function fetchAvailableModelIds(): Promise<string[]> {
+  const baseUrl = process.env.LITELLM_BASE_URL ?? "http://localhost:4000";
+  const apiKey = process.env.LITELLM_API_KEY;
+  const url = `${baseUrl.replace(/\/$/, "")}/v1/models`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: {
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+      },
+      signal: AbortSignal.timeout(10_000)
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to fetch model list from LiteLLM: ${message}`);
+  }
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`LiteLLM /v1/models failed: ${response.status} ${body}`);
+  }
+
+  const data = (await response.json()) as LiteLlmModelsResponse;
+  return (data.data ?? [])
+    .map((item) => item.id)
+    .filter((id): id is string => typeof id === "string" && id.trim().length > 0);
 }

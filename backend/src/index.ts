@@ -4,13 +4,14 @@ import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import { db, initializeDb, resetTelemetryDb } from "./db.js";
-import { generateSearchReplace } from "./litellm.js";
+import { fetchAvailableModelIds, generateSearchReplace } from "./litellm.js";
 import { defaultModel as generatedDefaultModel, supportedModels } from "./modelCatalog.generated.js";
 import { generateRequestSchema, telemetryRequestSchema } from "./schemas.js";
 import type {
   GenerateResponse,
   IdeActivityResponse,
   IdeMonitorEvent,
+  PostAcceptTaskReworkRow,
   RecentActivityRow,
   StatsResponse,
   TelemetryRequest
@@ -28,10 +29,12 @@ const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
 initializeDb();
 
 type GenerateFn = typeof generateSearchReplace;
+type ListModelsFn = typeof fetchAvailableModelIds;
 
-export function createApp(deps?: { generateFn?: GenerateFn }) {
+export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListModelsFn }) {
   const app = express();
   const generateFn = deps?.generateFn ?? generateSearchReplace;
+  const listModelsFn = deps?.listModelsFn ?? fetchAvailableModelIds;
 
   app.use(cors({ origin: corsOrigin }));
   app.use(express.json({ limit: "1mb" }));
@@ -40,11 +43,30 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
     res.json({ ok: true });
   });
 
-  app.get("/api/models", (_req, res) => {
-    res.json({
-      defaultModel,
-      supportedModels: [...supportedModels]
-    });
+  app.get("/api/health", (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.get("/api/models", async (_req, res) => {
+    try {
+      const liveModelIds = await listModelsFn();
+      const responseModels: string[] = [...supportedModels];
+      const availableModels = supportedModels.filter((model) => liveModelIds.includes(model));
+      const responseDefault = responseModels.includes(defaultModel) ? defaultModel : responseModels[0];
+      res.json({
+        defaultModel: responseDefault,
+        supportedModels: responseModels,
+        availableModels
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // eslint-disable-next-line no-console
+      console.warn("[/api/models] using catalog fallback:", message);
+      res.json({
+        defaultModel,
+        supportedModels: [...supportedModels]
+      });
+    }
   });
 
   app.post("/api/generate", async (req, res) => {
@@ -68,23 +90,47 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
   const promptSnippet = prompt.slice(0, 120);
 
   try {
-    const raw = await generateFn({
-      prompt,
-      model: requestedModel,
-      filePath: context.filePath,
-      selectionOrCaretSnippet: context.selectionOrCaretSnippet,
-      languageId: context.languageId
-    });
+    let effectiveModel = requestedModel;
+    let raw: string;
+    try {
+      raw = await generateFn({
+        prompt,
+        model: effectiveModel,
+        filePath: context.filePath,
+        selectionOrCaretSnippet: context.selectionOrCaretSnippet,
+        languageId: context.languageId
+      });
+    } catch (primaryError) {
+      const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
+      const shouldFallback =
+        effectiveModel !== defaultModel &&
+        (primaryMessage.includes("Invalid model name passed") ||
+          primaryMessage.includes("invalid model name"));
+      if (!shouldFallback) {
+        throw primaryError;
+      }
+
+      // Retry once with configured default model for keys lacking the selected model.
+      effectiveModel = defaultModel;
+      raw = await generateFn({
+        prompt,
+        model: effectiveModel,
+        filePath: context.filePath,
+        selectionOrCaretSnippet: context.selectionOrCaretSnippet,
+        languageId: context.languageId
+      });
+    }
+
     db.prepare(
       `INSERT INTO tasks (task_id, prompt_snippet, model, status, created_at)
        VALUES (?, ?, ?, 'SUCCEEDED', ?)`
-    ).run(taskId, promptSnippet, requestedModel, now);
+    ).run(taskId, promptSnippet, effectiveModel, now);
 
     const response: GenerateResponse = {
       task_id: taskId,
       diff_id: diffId,
       raw,
-      model: requestedModel
+      model: effectiveModel
     };
     return res.json(response);
   } catch (error) {
@@ -135,6 +181,8 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
   });
 
   app.get("/api/stats", (_req, res) => {
+  const postAcceptExclusion = `COALESCE(e.metadata, '') NOT LIKE '%"source":"post-accept"%'`;
+
   const totals = db
     .prepare(
       `SELECT
@@ -142,21 +190,27 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
          SUM(CASE WHEN type = 'ACCEPTED' THEN 1 ELSE 0 END) AS accepted,
          SUM(CASE WHEN type = 'REJECTED' THEN 1 ELSE 0 END) AS rejected,
          SUM(CASE WHEN type = 'ITERATED' THEN 1 ELSE 0 END) AS iterated
-       FROM events`
+       FROM events e
+       INNER JOIN tasks t ON t.task_id = e.task_id
+       WHERE t.model != 'ide-monitor'
+         AND ${postAcceptExclusion}`
     )
     .get() as { diffRendered: number | null; accepted: number | null; rejected: number | null; iterated: number | null };
 
   const totalTasksRow = db
-    .prepare(`SELECT COUNT(DISTINCT task_id) AS totalTasks FROM tasks WHERE status = 'SUCCEEDED'`)
+    .prepare(`SELECT COUNT(DISTINCT task_id) AS totalTasks FROM tasks WHERE status = 'SUCCEEDED' AND model != 'ide-monitor'`)
     .get() as { totalTasks: number };
 
   const avgIterationsRow = db
     .prepare(
       `WITH accepted_per_task AS (
-         SELECT task_id, MIN(created_at) AS first_accept_at
-         FROM events
+         SELECT e.task_id, MIN(e.created_at) AS first_accept_at
+         FROM events e
+         INNER JOIN tasks t ON t.task_id = e.task_id
          WHERE type = 'ACCEPTED'
-         GROUP BY task_id
+           AND t.model != 'ide-monitor'
+           AND ${postAcceptExclusion}
+         GROUP BY e.task_id
        ),
        iterations_before_accept AS (
          SELECT a.task_id, COUNT(e.id) AS iteration_count
@@ -165,6 +219,9 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
            ON e.task_id = a.task_id
           AND e.type = 'ITERATED'
           AND e.created_at <= a.first_accept_at
+         LEFT JOIN tasks t ON t.task_id = e.task_id
+         WHERE (t.model != 'ide-monitor' OR t.model IS NULL)
+           AND ${postAcceptExclusion}
          GROUP BY a.task_id
        )
        SELECT COALESCE(AVG(iteration_count), 0) AS avgIterations
@@ -175,10 +232,13 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
   const timeSeries = db
     .prepare(
       `SELECT
-         strftime('%Y-%m-%d', created_at) AS bucket,
+         strftime('%Y-%m-%d', e.created_at) AS bucket,
          SUM(CASE WHEN type = 'ACCEPTED' THEN 1 ELSE 0 END) AS accepted,
          SUM(CASE WHEN type = 'REJECTED' THEN 1 ELSE 0 END) AS rejected
-       FROM events
+       FROM events e
+       INNER JOIN tasks t ON t.task_id = e.task_id
+       WHERE t.model != 'ide-monitor'
+         AND ${postAcceptExclusion}
        GROUP BY bucket
        ORDER BY bucket DESC
        LIMIT 30`
@@ -196,6 +256,8 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
          e.diff_id AS diff_id
        FROM events e
        INNER JOIN tasks t ON t.task_id = e.task_id
+       WHERE t.model != 'ide-monitor'
+         AND ${postAcceptExclusion}
        ORDER BY e.created_at DESC
        LIMIT 20`
     )
@@ -205,6 +267,77 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
   const accepted = totals.accepted ?? 0;
   const rejected = totals.rejected ?? 0;
   const iterated = totals.iterated ?? 0;
+
+  const acceptedRows = db
+    .prepare(
+      `SELECT e.task_id AS task_id, e.created_at AS created_at
+       FROM events e
+       INNER JOIN tasks t ON t.task_id = e.task_id
+       WHERE e.type = 'ACCEPTED'
+         AND t.model != 'ide-monitor'
+       ORDER BY e.created_at ASC`
+    )
+    .all() as Array<{ task_id: string; created_at: string }>;
+
+  const postAcceptRows = db
+    .prepare(
+      `SELECT task_id, created_at, metadata
+       FROM events
+       WHERE COALESCE(metadata, '') LIKE '%"source":"post-accept"%'
+       ORDER BY created_at ASC`
+    )
+    .all() as Array<{ task_id: string; created_at: string; metadata: string | null }>;
+
+  const acceptedByTask = new Map<string, string>();
+  for (const row of acceptedRows) {
+    if (!acceptedByTask.has(row.task_id)) {
+      acceptedByTask.set(row.task_id, row.created_at);
+    }
+  }
+
+  const firstPostAcceptByTask = new Map<string, string>();
+  const maxCharDeltaByTask = new Map<string, number>();
+  for (const row of postAcceptRows) {
+    if (!acceptedByTask.has(row.task_id)) {
+      continue;
+    }
+    if (!firstPostAcceptByTask.has(row.task_id)) {
+      firstPostAcceptByTask.set(row.task_id, row.created_at);
+    }
+    const meta = parseMeta(row.metadata);
+    const charDelta = typeof meta.charDelta === "number" ? meta.charDelta : null;
+    if (charDelta !== null) {
+      const previous = maxCharDeltaByTask.get(row.task_id) ?? 0;
+      maxCharDeltaByTask.set(row.task_id, Math.max(previous, charDelta));
+    }
+  }
+
+  const acceptedTaskCount = acceptedByTask.size;
+  const editedTaskCount = firstPostAcceptByTask.size;
+  const editedTaskRate = acceptedTaskCount === 0 ? 0 : (editedTaskCount / acceptedTaskCount) * 100;
+  const avgCharDelta =
+    maxCharDeltaByTask.size === 0
+      ? 0
+      : [...maxCharDeltaByTask.values()].reduce((sum, value) => sum + value, 0) / maxCharDeltaByTask.size;
+
+  const secondsToFirstEdit = [...firstPostAcceptByTask.entries()]
+    .map(([taskId, firstEditAt]) => {
+      const acceptedAt = acceptedByTask.get(taskId);
+      if (!acceptedAt) {
+        return null;
+      }
+      const deltaMs = new Date(firstEditAt).getTime() - new Date(acceptedAt).getTime();
+      return Number.isFinite(deltaMs) ? Math.max(0, deltaMs / 1000) : null;
+    })
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b);
+
+  const medianSecondsToFirstEdit =
+    secondsToFirstEdit.length === 0
+      ? 0
+      : secondsToFirstEdit.length % 2 === 1
+        ? secondsToFirstEdit[Math.floor(secondsToFirstEdit.length / 2)]
+        : (secondsToFirstEdit[secondsToFirstEdit.length / 2 - 1] + secondsToFirstEdit[secondsToFirstEdit.length / 2]) / 2;
 
   const response: StatsResponse = {
     acceptanceRate: diffRendered === 0 ? 0 : (accepted / diffRendered) * 100,
@@ -217,7 +350,12 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
       iterated
     },
     timeSeries: [...timeSeries].reverse(),
-    recentActivity
+    recentActivity,
+    postAccept: {
+      editedTaskRate: Number(editedTaskRate.toFixed(1)),
+      avgCharDelta: Number(avgCharDelta.toFixed(1)),
+      medianSecondsToFirstEdit: Number(medianSecondsToFirstEdit.toFixed(1))
+    }
   };
 
     res.json(response);
@@ -310,6 +448,93 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
       }));
 
     res.json({ events });
+  });
+
+  app.get("/api/stats/post-accept-tasks", (_req, res) => {
+    const acceptedRows = db
+      .prepare(
+        `SELECT
+           e.task_id AS task_id,
+           MIN(e.created_at) AS firstAcceptedAt,
+           t.prompt_snippet AS promptSnippet,
+           t.model AS model
+         FROM events e
+         INNER JOIN tasks t ON t.task_id = e.task_id
+         WHERE e.type = 'ACCEPTED'
+           AND t.model != 'ide-monitor'
+         GROUP BY e.task_id`
+      )
+      .all() as Array<{ task_id: string; firstAcceptedAt: string; promptSnippet: string; model: string }>;
+
+    const postAcceptRows = db
+      .prepare(
+        `SELECT task_id, created_at, metadata
+         FROM events
+         WHERE COALESCE(metadata, '') LIKE '%"source":"post-accept"%'
+         ORDER BY created_at ASC`
+      )
+      .all() as Array<{ task_id: string; created_at: string; metadata: string | null }>;
+
+    const acceptedByTask = new Map(
+      acceptedRows.map((row) => [
+        row.task_id,
+        { acceptedAt: row.firstAcceptedAt, promptSnippet: row.promptSnippet, model: row.model }
+      ])
+    );
+
+    const aggregates = new Map<
+      string,
+      { firstEditedAt: string; maxCharDelta: number; maxLineDelta: number; editsAfterAccept: number }
+    >();
+
+    for (const row of postAcceptRows) {
+      const accepted = acceptedByTask.get(row.task_id);
+      if (!accepted) continue;
+      if (new Date(row.created_at).getTime() < new Date(accepted.acceptedAt).getTime()) continue;
+
+      const meta = parseMeta(row.metadata);
+      const charDelta = typeof meta.charDelta === "number" ? meta.charDelta : 0;
+      const lineDelta = typeof meta.lineDelta === "number" ? meta.lineDelta : 0;
+      const editsAfterAccept = typeof meta.editsAfterAccept === "number" ? meta.editsAfterAccept : 0;
+
+      const current = aggregates.get(row.task_id);
+      if (!current) {
+        aggregates.set(row.task_id, {
+          firstEditedAt: row.created_at,
+          maxCharDelta: charDelta,
+          maxLineDelta: lineDelta,
+          editsAfterAccept
+        });
+      } else {
+        current.maxCharDelta = Math.max(current.maxCharDelta, charDelta);
+        current.maxLineDelta = Math.max(current.maxLineDelta, lineDelta);
+        current.editsAfterAccept = Math.max(current.editsAfterAccept, editsAfterAccept);
+      }
+    }
+
+    const rows: PostAcceptTaskReworkRow[] = [...aggregates.entries()]
+      .map(([taskId, aggregate]) => {
+        const accepted = acceptedByTask.get(taskId);
+        if (!accepted) return null;
+        const secondsToFirstEdit =
+          (new Date(aggregate.firstEditedAt).getTime() - new Date(accepted.acceptedAt).getTime()) / 1000;
+        return {
+          taskId,
+          promptSnippet: accepted.promptSnippet,
+          model: accepted.model,
+          firstAcceptedAt: accepted.acceptedAt,
+          firstEditedAt: aggregate.firstEditedAt,
+          secondsToFirstEdit: Number(Math.max(secondsToFirstEdit, 0).toFixed(1)),
+          maxCharDelta: aggregate.maxCharDelta,
+          maxLineDelta: aggregate.maxLineDelta,
+          editsAfterAccept: aggregate.editsAfterAccept
+        };
+      })
+      .filter((row): row is PostAcceptTaskReworkRow => row !== null)
+      .sort((a, b) => b.maxCharDelta - a.maxCharDelta)
+      .slice(0, 20);
+
+    res.json({ rows });
   });
 
   return app;

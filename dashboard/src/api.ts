@@ -23,6 +23,11 @@ export interface StatsResponse {
     task_id: string;
     diff_id: string;
   }>;
+  postAccept: {
+    editedTaskRate: number;
+    avgCharDelta: number;
+    medianSecondsToFirstEdit: number;
+  };
 }
 
 export interface IdeActivityResponse {
@@ -40,6 +45,18 @@ export interface IdeMonitorEvent {
   languageId: string | null;
 }
 
+export interface PostAcceptTaskReworkRow {
+  taskId: string;
+  promptSnippet: string;
+  model: string;
+  firstAcceptedAt: string;
+  firstEditedAt: string;
+  secondsToFirstEdit: number;
+  maxCharDelta: number;
+  maxLineDelta: number;
+  editsAfterAccept: number;
+}
+
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
 export async function fetchStats(): Promise<StatsResponse> {
@@ -51,7 +68,7 @@ export async function fetchStats(): Promise<StatsResponse> {
 }
 
 export async function fetchHealth(): Promise<{ ok: boolean }> {
-  const response = await fetch(`${apiBaseUrl}/health`);
+  const response = await fetch(`${apiBaseUrl}/api/health`);
   if (!response.ok) {
     throw new Error(`Failed to fetch health: ${response.status}`);
   }
@@ -80,4 +97,12 @@ export async function fetchIdeEvents(): Promise<{ events: IdeMonitorEvent[] }> {
     throw new Error(`Failed to fetch IDE events: ${response.status}`);
   }
   return (await response.json()) as { events: IdeMonitorEvent[] };
+}
+
+export async function fetchPostAcceptTaskRework(): Promise<{ rows: PostAcceptTaskReworkRow[] }> {
+  const response = await fetch(`${apiBaseUrl}/api/stats/post-accept-tasks`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch post-accept task rework: ${response.status}`);
+  }
+  return (await response.json()) as { rows: PostAcceptTaskReworkRow[] };
 }

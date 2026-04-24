@@ -45,6 +45,19 @@ describe("backend integrity behaviors", () => {
     assert.equal(typeof response.body.defaultModel, "string");
   });
 
+  it("returns full configured model list and live availability subset", async () => {
+    const app = createApp({
+      listModelsFn: async () => ["gemini-flash", "gemini-2.5-pro", "other-model"]
+    });
+    const response = await request(app).get("/api/models");
+    assert.equal(response.status, 200);
+    assert.ok(response.body.supportedModels.includes("gemini-2.5-flash"));
+    assert.ok(response.body.supportedModels.includes("gemini-2.5-flash-lite"));
+    assert.ok(response.body.supportedModels.includes("gemini-2.5-pro"));
+    assert.deepEqual(response.body.availableModels, ["gemini-flash", "gemini-2.5-pro"]);
+    assert.equal(response.body.defaultModel, "gemini-flash");
+  });
+
   it("rejects unsupported model names", async () => {
     const app = createApp({
       generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
@@ -153,5 +166,99 @@ describe("backend integrity behaviors", () => {
 
     const countRow = db.prepare("SELECT COUNT(*) as count FROM events").get() as { count: number };
     assert.equal(countRow.count, 0);
+  });
+
+  it("computes post-accept edit metrics", async () => {
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    const generateResponse = await request(app).post("/api/generate").send({
+      prompt: "bump a",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+    assert.equal(generateResponse.status, 200);
+    const taskId = generateResponse.body.task_id as string;
+    const diffId = generateResponse.body.diff_id as string;
+
+    const acceptedAt = "2026-04-24T10:00:00.000Z";
+    const editedAt = "2026-04-24T10:00:10.000Z";
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: diffId,
+      event: "ACCEPTED",
+      timestamp: acceptedAt
+    });
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "post-accept-edit-1",
+      event: "DIFF_RENDERED",
+      timestamp: editedAt,
+      meta: { source: "post-accept", activityType: "post_accept_edit", charDelta: 12 }
+    });
+
+    const statsResponse = await request(app).get("/api/stats");
+    assert.equal(statsResponse.status, 200);
+    assert.equal(statsResponse.body.postAccept.editedTaskRate, 100);
+    assert.equal(statsResponse.body.postAccept.avgCharDelta, 12);
+    assert.equal(statsResponse.body.postAccept.medianSecondsToFirstEdit, 10);
+
+    const postAcceptTasks = await request(app).get("/api/stats/post-accept-tasks");
+    assert.equal(postAcceptTasks.status, 200);
+    assert.ok(Array.isArray(postAcceptTasks.body.rows));
+    assert.equal(postAcceptTasks.body.rows.length, 1);
+    assert.equal(postAcceptTasks.body.rows[0].taskId, taskId);
+    assert.equal(postAcceptTasks.body.rows[0].maxCharDelta, 12);
+    assert.equal(postAcceptTasks.body.rows[0].secondsToFirstEdit, 10);
+  });
+
+  it("excludes post-accept edits from acceptance funnel metrics", async () => {
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    const generateResponse = await request(app).post("/api/generate").send({
+      prompt: "bump a",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+    assert.equal(generateResponse.status, 200);
+    const taskId = generateResponse.body.task_id as string;
+    const diffId = generateResponse.body.diff_id as string;
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: diffId,
+      event: "DIFF_RENDERED",
+      timestamp: "2026-04-24T10:00:00.000Z"
+    });
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "accept-1",
+      event: "ACCEPTED",
+      timestamp: "2026-04-24T10:00:05.000Z"
+    });
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "post-accept-edit-2",
+      event: "DIFF_RENDERED",
+      timestamp: "2026-04-24T10:00:10.000Z",
+      meta: { source: "post-accept", activityType: "post_accept_edit", charDelta: 5 }
+    });
+
+    const statsResponse = await request(app).get("/api/stats");
+    assert.equal(statsResponse.status, 200);
+    assert.equal(statsResponse.body.totals.diffRendered, 1);
+    assert.equal(statsResponse.body.totals.accepted, 1);
+    assert.equal(statsResponse.body.acceptanceRate, 100);
   });
 });

@@ -51,6 +51,10 @@ class IdeTelemetryStartupActivity : StartupActivity.DumbAware {
                     override fun documentChanged(event: DocumentEvent) {
                         val file = FileDocumentManager.getInstance().getFile(event.document) ?: return
                         emitter.emitThrottledEdit(file.path, file.extension ?: "unknown")
+                        val postAccept = PostAcceptTracker.onDocumentEdited(file.path, event.document.text)
+                        if (postAccept != null) {
+                            emitter.emitPostAccept(postAccept)
+                        }
                     }
                 },
                 project
@@ -92,6 +96,19 @@ private class IdeTelemetryEmitter(
         }
         editLastSentAt[filePath] = now
         emitWithMeta("edited", filePath, languageId)
+    }
+
+    fun emitPostAccept(emission: PostAcceptEmission) {
+        runCatching {
+            backendClient.telemetry(
+                TelemetryRequest(
+                    task_id = emission.taskId,
+                    diff_id = UUID.randomUUID().toString(),
+                    event = TelemetryEventType.DIFF_RENDERED,
+                    meta = emission.meta
+                )
+            )
+        }
     }
 
     private fun emitWithMeta(activityType: String, filePath: String?, languageId: String?) {

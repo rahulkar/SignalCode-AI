@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check:model-catalog": "node ../scripts/sync-model-catalog.mjs --check",
+    "check:model-catalog": "node -e \"const {existsSync}=require('node:fs'); const {spawnSync}=require('node:child_process'); const root=existsSync('../scripts/sync-model-catalog.mjs')?'..':'.'; const script='scripts/sync-model-catalog.mjs'; if(!existsSync(root+'/'+script)){console.warn('[model-catalog] skip check: script not found at '+root+'/'+script); process.exit(0);} const result=spawnSync(process.execPath,[script,'--check'],{stdio:'inherit',cwd:root}); process.exit(result.status ?? 1);\"",
     "dev": "npm run check:model-catalog && tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "npm run check:model-catalog && node dist/index.js",

@@ -160,12 +160,13 @@ class SignalCodeInlineAction : AnAction() {
             val models = runCatching { withContext(Dispatchers.IO) { backendClient.fetchModels() } }.getOrNull() ?: return@launch
             ApplicationManager.getApplication().invokeLater {
                 val currentSelection = (modelCombo.selectedItem as? String) ?: promptHistoryService.selectedModel(DEFAULT_MODEL)
+                val visibleModels = models.supportedModels
                 modelCombo.removeAllItems()
-                models.supportedModels.forEach { modelCombo.addItem(it) }
+                visibleModels.forEach { modelCombo.addItem(it) }
                 val preferred = when {
-                    models.supportedModels.contains(currentSelection) -> currentSelection
-                    models.supportedModels.contains(models.defaultModel) -> models.defaultModel
-                    models.supportedModels.isNotEmpty() -> models.supportedModels.first()
+                    visibleModels.contains(currentSelection) -> currentSelection
+                    visibleModels.contains(models.defaultModel) -> models.defaultModel
+                    visibleModels.isNotEmpty() -> visibleModels.first()
                     else -> DEFAULT_MODEL
                 }
                 modelCombo.selectedItem = preferred
@@ -360,6 +361,15 @@ class SignalCodeInlineAction : AnAction() {
             }
             val applied = diff.session.accept(project, diff.search, diff.replace)
             if (applied) {
+                val filePath = diff.meta["filePath"] as? String
+                if (!filePath.isNullOrBlank()) {
+                    PostAcceptTracker.registerAccepted(
+                        taskId = diff.taskId,
+                        acceptedDiffId = diff.diffId,
+                        filePath = filePath,
+                        acceptedText = editor.document.text
+                    )
+                }
                 scope.launch(Dispatchers.IO) {
                     runCatching {
                         backendClient.telemetry(

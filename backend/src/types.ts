@@ -56,6 +56,11 @@ export interface StatsResponse {
   };
   timeSeries: TimeSeriesPoint[];
   recentActivity: RecentActivityRow[];
+  postAccept: {
+    editedTaskRate: number;
+    avgCharDelta: number;
+    medianSecondsToFirstEdit: number;
+  };
 }
 
 export interface IdeActivityResponse {
@@ -71,4 +76,16 @@ export interface IdeMonitorEvent {
   activityType: string;
   filePath: string | null;
   languageId: string | null;
+}
+
+export interface PostAcceptTaskReworkRow {
+  taskId: string;
+  promptSnippet: string;
+  model: string;
+  firstAcceptedAt: string;
+  firstEditedAt: string;
+  secondsToFirstEdit: number;
+  maxCharDelta: number;
+  maxLineDelta: number;
+  editsAfterAccept: number;
 }

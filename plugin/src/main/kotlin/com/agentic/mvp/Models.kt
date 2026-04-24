@@ -40,5 +40,6 @@ data class SearchReplaceDiff(
 
 data class ModelsResponse(
     val defaultModel: String,
-    val supportedModels: List<String>
+    val supportedModels: List<String>,
+    val availableModels: List<String>? = null
 )
