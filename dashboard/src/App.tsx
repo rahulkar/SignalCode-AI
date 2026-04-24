@@ -15,6 +15,7 @@ import {
   type StatsRange,
   type StatsResponse
 } from "./api";
+import { Icon, type IconName } from "./components/icons";
 import { ActivityTable, ChartPanel, ControlPanel, IdeEventDebugPanel, KpiGrid, PostAcceptReworkPanel, StatusBadge } from "./components/dashboard";
 
 const AUTO_REFRESH_OPTIONS = [0, 5000, 10000, 30000] as const;
@@ -179,11 +180,13 @@ export function App() {
           <div className="topbar__actions">
             <div className="hero-chip-group">
               <button className="theme-toggle" onClick={() => setTheme(isDark ? "light" : "dark")} type="button">
-                {isDark ? "Light mode" : "Dark mode"}
+                <Icon name="appearance" />
+                <span>Canvas</span>
+                <strong>{isDark ? "Midnight" : "Daybreak"}</strong>
               </button>
-              <InfoChip label="Window" value={timeRange.toUpperCase()} />
-              <InfoChip label="Refresh" value={autoRefreshMs === 0 ? "Manual" : `${autoRefreshMs / 1000}s`} />
-              <InfoChip label="Last Sync" value={formatLastSync(lastLoadedAt)} />
+              <InfoChip icon="window" label="Window" value={timeRange.toUpperCase()} />
+              <InfoChip icon="refresh" label="Refresh" value={autoRefreshMs === 0 ? "Manual" : `${autoRefreshMs / 1000}s`} />
+              <InfoChip icon="sync" label="Last Sync" value={formatLastSync(lastLoadedAt)} />
             </div>
             <StatusBadge healthy={apiHealthy} ideConnected={ideActivity?.ideConnected ?? false} />
           </div>
@@ -199,9 +202,9 @@ export function App() {
               KPIs, trend panels, and recent activity stay aligned to the same time window so the data is easier to compare.
             </p>
             <div className="hero-banner__meta">
-              <HeroStat label="Accepted" value={String(windowOutcomeData[0]?.value ?? 0)} accent="success" />
-              <HeroStat label="Rejected" value={String(windowOutcomeData[1]?.value ?? 0)} accent="danger" />
-              <HeroStat label="Iterated" value={String(windowOutcomeData[2]?.value ?? 0)} accent="info" />
+              <HeroStat icon="accepted" label="Accepted" value={String(windowOutcomeData[0]?.value ?? 0)} accent="success" />
+              <HeroStat icon="rejected" label="Rejected" value={String(windowOutcomeData[1]?.value ?? 0)} accent="danger" />
+              <HeroStat icon="iterated" label="Iterated" value={String(windowOutcomeData[2]?.value ?? 0)} accent="info" />
             </div>
           </div>
         </section>
@@ -266,7 +269,7 @@ export function App() {
             </motion.section>
 
             <ActivityTable rows={filteredActivity} />
-            <PostAcceptReworkPanel rows={postAcceptRows} />
+            <PostAcceptReworkPanel rows={postAcceptRows} isDark={isDark} />
           </section>
 
           <aside className="dashboard-aside">
@@ -291,7 +294,12 @@ export function App() {
               <div className="panel-heading">
                 <div>
                   <p className="panel-heading__eyebrow">Live Connection</p>
-                  <h2 className="panel-heading__title">IDE status</h2>
+                  <h2 className="panel-heading__title panel-heading__title--with-icon">
+                    <span className="icon-badge icon-badge--info" aria-hidden>
+                      <Icon name="terminal" size={16} />
+                    </span>
+                    IDE status
+                  </h2>
                 </div>
               </div>
               {ideActivity?.lastEventAt ? (
@@ -363,19 +371,37 @@ function ErrorBanner({ message }: { message: string }) {
   );
 }
 
-function InfoChip({ label, value }: { label: string; value: string }) {
+function InfoChip({ icon, label, value }: { icon: IconName; label: string; value: string }) {
   return (
     <div className="info-chip">
+      <span className="chip-icon" aria-hidden>
+        <Icon name={icon} size={14} />
+      </span>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
   );
 }
 
-function HeroStat({ label, value, accent }: { label: string; value: string; accent: "success" | "danger" | "info" }) {
+function HeroStat({
+  icon,
+  label,
+  value,
+  accent
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+  accent: "success" | "danger" | "info";
+}) {
   return (
     <div className={`hero-stat hero-stat--${accent}`}>
-      <span>{label}</span>
+      <div className="hero-stat__top">
+        <span>{label}</span>
+        <span className={`icon-badge icon-badge--${accent}`} aria-hidden>
+          <Icon name={icon} size={15} />
+        </span>
+      </div>
       <strong>{value}</strong>
     </div>
   );

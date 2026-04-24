@@ -62,16 +62,7 @@
 
   body {
     @apply m-0 antialiased;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0)) 0 0 / 100% 180px no-repeat,
-      linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px),
-      linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
-      var(--surface-ground);
-    background-size:
-      100% 180px,
-      24px 24px,
-      24px 24px,
-      auto;
+    background: var(--surface-ground);
     color: var(--text-primary);
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
@@ -96,6 +87,7 @@
 @layer components {
   .app-shell {
     @apply min-h-screen;
+    background: var(--surface-ground);
   }
 
   .topbar {
@@ -107,7 +99,7 @@
   }
 
   .topbar__inner {
-    @apply mx-auto flex w-full max-w-[1280px] flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-start lg:justify-between lg:px-8;
+    @apply flex w-full flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-start lg:justify-between lg:px-8;
   }
 
   .topbar__eyebrow,
@@ -157,6 +149,11 @@
     color: var(--interactive-primary);
   }
 
+  .theme-toggle strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
   .theme-toggle:hover,
   .info-chip:hover,
   .summary-pill:hover {
@@ -178,7 +175,7 @@
   }
 
   .app-main {
-    @apply mx-auto w-full max-w-[1280px] px-4 pb-8 pt-6 sm:px-6 lg:px-8;
+    @apply w-full px-4 pb-8 pt-6 sm:px-6 lg:px-8;
   }
 
   .hero-banner {
@@ -213,6 +210,10 @@
   .hero-stat span {
     @apply text-[11px] font-medium uppercase tracking-[0.14em];
     color: var(--text-tertiary);
+  }
+
+  .hero-stat__top {
+    @apply flex items-center justify-between gap-3;
   }
 
   .hero-stat strong {
@@ -286,6 +287,12 @@
     color: var(--text-primary);
   }
 
+  .section-heading__title--with-icon,
+  .panel-heading__title--with-icon,
+  .chart-header__title--with-icon {
+    @apply flex items-center gap-2;
+  }
+
   .soft-badge {
     @apply inline-flex items-center self-start rounded-md border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em] sm:self-auto;
     border-color: color-mix(in srgb, var(--interactive-primary) 22%, var(--border-default));
@@ -299,6 +306,10 @@
 
   .metric-card {
     @apply relative overflow-hidden;
+  }
+
+  .metric-card__header {
+    @apply flex items-start justify-between gap-3;
   }
 
   .metric-card__accent {
@@ -329,6 +340,21 @@
     color: var(--text-secondary);
   }
 
+  .control-group {
+    @apply space-y-3 rounded-lg border p-3;
+    border-color: var(--border-default);
+    background: color-mix(in srgb, var(--surface-elevated) 100%, transparent);
+  }
+
+  .control-group__header {
+    @apply flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.14em];
+    color: var(--text-tertiary);
+  }
+
+  .control-label {
+    @apply inline-flex items-center gap-2;
+  }
+
   .control-input {
     @apply min-h-8 rounded-md border px-3 text-[13px] outline-none transition;
     border-color: var(--border-default);
@@ -351,6 +377,7 @@
   .btn-secondary,
   .btn-danger {
     @apply inline-flex min-h-8 items-center justify-center rounded-md px-3 text-[13px] font-medium transition;
+    gap: 0.5rem;
   }
 
   .btn-primary {
@@ -403,8 +430,8 @@
   }
 
   .status-chip__dot {
-    @apply h-1.5 w-1.5 shrink-0 rounded-full;
-    background: #a3a3a3;
+    @apply inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full;
+    background: color-mix(in srgb, currentColor 12%, transparent);
   }
 
   .status-chip--success {
@@ -414,7 +441,7 @@
   }
 
   .status-chip--success .status-chip__dot {
-    background: var(--success);
+    color: var(--success);
   }
 
   .status-chip--danger {
@@ -424,7 +451,7 @@
   }
 
   .status-chip--danger .status-chip__dot {
-    background: var(--danger);
+    color: var(--danger);
   }
 
   .table-shell {
@@ -507,8 +534,12 @@
   }
 
   .event-card__title {
-    @apply mt-1 font-medium;
+    @apply mt-1 flex items-center gap-2 font-medium;
     color: var(--text-primary);
+  }
+
+  .event-card__icon {
+    color: var(--interactive-primary);
   }
 
   .event-card__path {
@@ -530,6 +561,13 @@
 
   .empty-state--compact {
     @apply min-h-0 py-4;
+  }
+
+  .empty-state__icon {
+    @apply inline-flex h-11 w-11 items-center justify-center rounded-2xl border;
+    border-color: color-mix(in srgb, var(--interactive-primary) 16%, var(--border-default));
+    background: color-mix(in srgb, var(--interactive-primary) 10%, var(--surface-card));
+    color: var(--interactive-primary);
   }
 
   .empty-state__title {
@@ -598,6 +636,46 @@
 
   .distribution-legend__values span {
     color: var(--text-tertiary);
+  }
+
+  .chip-icon {
+    @apply inline-flex h-4 w-4 items-center justify-center;
+    color: currentColor;
+  }
+
+  .icon-badge {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-lg border;
+    border-color: var(--border-default);
+    background: color-mix(in srgb, var(--surface-card) 94%, transparent);
+    color: var(--text-secondary);
+  }
+
+  .icon-badge--info {
+    border-color: color-mix(in srgb, var(--interactive-primary) 24%, var(--border-default));
+    background: color-mix(in srgb, var(--interactive-primary) 10%, var(--surface-card));
+    color: var(--interactive-primary);
+  }
+
+  .icon-badge--success {
+    border-color: color-mix(in srgb, var(--success) 24%, var(--border-default));
+    background: color-mix(in srgb, var(--success) 10%, var(--surface-card));
+    color: var(--success);
+  }
+
+  .icon-badge--warning {
+    border-color: color-mix(in srgb, var(--warning) 28%, var(--border-default));
+    background: color-mix(in srgb, var(--warning) 10%, var(--surface-card));
+    color: var(--warning);
+  }
+
+  .icon-badge--danger {
+    border-color: color-mix(in srgb, var(--danger) 24%, var(--border-default));
+    background: color-mix(in srgb, var(--danger) 10%, var(--surface-card));
+    color: var(--danger);
+  }
+
+  .icon-badge--neutral {
+    color: var(--text-secondary);
   }
 
   @media (max-width: 1279px) {

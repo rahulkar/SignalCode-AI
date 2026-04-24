@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { useMemo, useState, type ReactNode } from "react";
 import type { IdeMonitorEvent, PostAcceptTaskReworkRow, StatsRange, StatsResponse } from "../api";
+import { Icon, type IconName } from "./icons";
 
 const CHART_GRID_STROKE = "rgba(148, 163, 184, 0.14)";
 const CHART_AXIS_STROKE = "#737373";
@@ -49,20 +50,20 @@ function formatBucketLabel(bucket: string, range: StatsRange): string {
 export function StatusBadge({ healthy, ideConnected }: { healthy: boolean; ideConnected: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Badge label={healthy ? "API Healthy" : "API Unreachable"} tone={healthy ? "success" : "danger"} />
-      <Badge label={ideConnected ? "IDE Connected" : "IDE Disconnected"} tone={ideConnected ? "success" : "danger"} />
+      <Badge icon="server" label={healthy ? "API Healthy" : "API Unreachable"} tone={healthy ? "success" : "danger"} />
+      <Badge icon="terminal" label={ideConnected ? "IDE Connected" : "IDE Disconnected"} tone={ideConnected ? "success" : "danger"} />
     </div>
   );
 }
 
 export function KpiGrid({ stats, isLoading }: { stats: StatsResponse | null; isLoading: boolean }) {
   const cards = [
-    { label: "Acceptance Rate", value: formatPercent(stats?.acceptanceRate ?? 0), helper: "Overall accepted / diff rendered" },
-    { label: "Total Tasks", value: String(stats?.totalTasks ?? 0), helper: "Successful tasks recorded" },
-    { label: "Avg Iterations", value: (stats?.averageIterationsBeforeAccept ?? 0).toFixed(2), helper: "Iterations before first accept" },
-    { label: "Post-Accept Edit Rate", value: formatPercent(stats?.postAccept.editedTaskRate ?? 0), helper: "Accepted tasks later edited" },
-    { label: "Avg Post-Accept Char Delta", value: String((stats?.postAccept.avgCharDelta ?? 0).toFixed(1)), helper: "Largest character delta per task" },
-    { label: "Median Time To First Edit", value: `${(stats?.postAccept.medianSecondsToFirstEdit ?? 0).toFixed(1)}s`, helper: "From accept to first human edit" }
+    { label: "Acceptance Rate", value: formatPercent(stats?.acceptanceRate ?? 0), helper: "Overall accepted / diff rendered", icon: "rate" as const, tone: "info" as const },
+    { label: "Total Tasks", value: String(stats?.totalTasks ?? 0), helper: "Successful tasks recorded", icon: "tasks" as const, tone: "neutral" as const },
+    { label: "Avg Iterations", value: (stats?.averageIterationsBeforeAccept ?? 0).toFixed(2), helper: "Iterations before first accept", icon: "layers" as const, tone: "info" as const },
+    { label: "Post-Accept Edit Rate", value: formatPercent(stats?.postAccept.editedTaskRate ?? 0), helper: "Accepted tasks later edited", icon: "edit" as const, tone: "warning" as const },
+    { label: "Avg Post-Accept Char Delta", value: String((stats?.postAccept.avgCharDelta ?? 0).toFixed(1)), helper: "Largest character delta per task", icon: "type" as const, tone: "warning" as const },
+    { label: "Median Time To First Edit", value: `${(stats?.postAccept.medianSecondsToFirstEdit ?? 0).toFixed(1)}s`, helper: "From accept to first human edit", icon: "timer" as const, tone: "success" as const }
   ];
 
   return (
@@ -70,7 +71,12 @@ export function KpiGrid({ stats, isLoading }: { stats: StatsResponse | null; isL
       {cards.map((card, index) => (
         <article key={card.label} className="metric-card">
           <div className="metric-card__accent" aria-hidden style={{ animationDelay: `${index * 70}ms` }} />
-          <p className="metric-card__label">{card.label}</p>
+          <div className="metric-card__header">
+            <p className="metric-card__label">{card.label}</p>
+            <span className={`icon-badge icon-badge--${card.tone}`} aria-hidden>
+              <Icon name={card.icon} size={15} />
+            </span>
+          </div>
           {isLoading || stats ? (
             <>
               <p className="metric-card__value">{isLoading ? "--" : card.value}</p>
@@ -122,19 +128,25 @@ export function ChartPanel({
       <div className="section-heading">
         <div>
           <p className="section-heading__eyebrow">Windowed Analytics</p>
-          <h2 className="section-heading__title">Recent delivery behavior</h2>
+          <h2 className="section-heading__title section-heading__title--with-icon">
+            <span className="icon-badge icon-badge--info" aria-hidden>
+              <Icon name="chart" size={16} />
+            </span>
+            Recent delivery behavior
+          </h2>
           <p className="section-heading__subtitle">Trends are bucketed across the last {formatRangeLabel(timeRange)}.</p>
         </div>
         <div className="summary-pill-group">
-          <SummaryPill label="Rendered" value={String(totals.diffRendered)} />
-          <SummaryPill label="Accepted" value={String(totals.accepted)} tone="success" />
-          <SummaryPill label="Momentum" value={formatPercent(latestMomentum)} tone="info" />
+          <SummaryPill icon="table" label="Rendered" value={String(totals.diffRendered)} />
+          <SummaryPill icon="accepted" label="Accepted" value={String(totals.accepted)} tone="success" />
+          <SummaryPill icon="momentum" label="Momentum" value={formatPercent(latestMomentum)} tone="info" />
         </div>
       </div>
 
       <section className="grid gap-4 xl:grid-cols-2">
         <article className="card card--elevated">
           <ChartHeader
+            icon="chart"
             title="Outcome Flow"
             subtitle="Accepted, iterated, and rejected outputs across the active analysis window."
             badge={timeRange.toUpperCase()}
@@ -180,6 +192,7 @@ export function ChartPanel({
 
         <article className="card card--elevated">
           <ChartHeader
+            icon="momentum"
             title="Acceptance Momentum"
             subtitle="Cumulative acceptance rate against rendered diffs, expressed as a percentage."
             badge={formatPercent(latestMomentum)}
@@ -239,7 +252,12 @@ export function ActivityTable({ rows }: { rows: StatsResponse["recentActivity"] 
       <div className="panel-heading">
         <div>
           <p className="panel-heading__eyebrow">Activity Feed</p>
-          <h2 className="panel-heading__title">Recent task events</h2>
+          <h2 className="panel-heading__title panel-heading__title--with-icon">
+            <span className="icon-badge icon-badge--info" aria-hidden>
+              <Icon name="events" size={16} />
+            </span>
+            Recent task events
+          </h2>
         </div>
         {rows.length > 5 ? <span className="soft-badge">5-row window</span> : null}
       </div>
@@ -296,14 +314,28 @@ export function ControlPanel(props: {
       <div className="panel-heading">
         <div>
           <p className="panel-heading__eyebrow">Command Panel</p>
-          <h2 className="panel-heading__title">Filters and controls</h2>
+          <h2 className="panel-heading__title panel-heading__title--with-icon">
+            <span className="icon-badge icon-badge--info" aria-hidden>
+              <Icon name="filter" size={16} />
+            </span>
+            Filters and controls
+          </h2>
           <p className="panel-heading__subtitle">Adjust the analysis window, filters, and refresh cadence.</p>
         </div>
       </div>
 
-      <div className="space-y-3 border p-3" style={{ borderColor: "var(--border-default)", background: "var(--surface-elevated)" }}>
+      <div className="control-group">
+        <div className="control-group__header">
+          <span className="icon-badge icon-badge--info" aria-hidden>
+            <Icon name="refresh" size={14} />
+          </span>
+          <span>Cadence</span>
+        </div>
         <label className="control-row">
-          <span>Auto Refresh</span>
+          <span className="control-label">
+            <Icon name="refresh" size={14} />
+            Auto Refresh
+          </span>
           <select value={props.autoRefreshMs} onChange={(e) => props.onAutoRefreshChange(Number(e.target.value))} className="control-input">
             {props.autoRefreshOptions.map((value) => (
               <option key={value} value={value}>
@@ -313,7 +345,10 @@ export function ControlPanel(props: {
           </select>
         </label>
         <label className="control-row">
-          <span>Analysis Window</span>
+          <span className="control-label">
+            <Icon name="window" size={14} />
+            Analysis Window
+          </span>
           <select value={props.timeRange} onChange={(e) => props.onTimeRangeChange(e.target.value as StatsRange)} className="control-input">
             {props.timeRanges.map((value) => (
               <option key={value} value={value}>
@@ -324,13 +359,25 @@ export function ControlPanel(props: {
         </label>
       </div>
 
-      <div className="space-y-3 border p-3" style={{ borderColor: "var(--border-default)", background: "var(--surface-elevated)" }}>
+      <div className="control-group">
+        <div className="control-group__header">
+          <span className="icon-badge icon-badge--info" aria-hidden>
+            <Icon name="search" size={14} />
+          </span>
+          <span>Filters</span>
+        </div>
         <label className="control-row">
-          <span>Search</span>
+          <span className="control-label">
+            <Icon name="search" size={14} />
+            Search
+          </span>
           <input value={props.query} onChange={(e) => props.onQueryChange(e.target.value)} className="control-input" placeholder="Prompt or model..." />
         </label>
         <label className="control-row">
-          <span>Outcome</span>
+          <span className="control-label">
+            <Icon name="filter" size={14} />
+            Outcome
+          </span>
           <select
             value={props.outcomeFilter}
             onChange={(e) => props.onOutcomeFilterChange(e.target.value as "ALL" | "ACCEPTED" | "REJECTED" | "ITERATED" | "DIFF_RENDERED")}
@@ -347,9 +394,11 @@ export function ControlPanel(props: {
 
       <div className="grid grid-cols-1 gap-2">
         <button className="btn-primary" onClick={props.onRefresh} type="button">
+          <Icon name="refresh" size={15} />
           Refresh dashboard
         </button>
         <button className="btn-secondary" onClick={props.onExportChangeSnapshots} type="button" disabled={props.isExporting}>
+          <Icon name="download" size={15} />
           {props.isExporting ? "Exporting..." : "Export PR-style JSON"}
         </button>
         <p className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
@@ -363,6 +412,7 @@ export function ControlPanel(props: {
           <p className="danger-card__copy">Remove all recorded telemetry and restart the command center with an empty data store.</p>
         </div>
         <button className="btn-danger" onClick={props.onResetDatabase} type="button">
+          <Icon name="trash" size={15} />
           Clear database
         </button>
       </section>
@@ -376,7 +426,12 @@ export function IdeEventDebugPanel({ events }: { events: IdeMonitorEvent[] }) {
       <div className="panel-heading">
         <div>
           <p className="panel-heading__eyebrow">IDE Telemetry</p>
-          <h2 className="panel-heading__title">Last 10 monitor events</h2>
+          <h2 className="panel-heading__title panel-heading__title--with-icon">
+            <span className="icon-badge icon-badge--info" aria-hidden>
+              <Icon name="terminal" size={16} />
+            </span>
+            Last 10 monitor events
+          </h2>
         </div>
       </div>
       <div className="space-y-2 text-xs">
@@ -386,7 +441,12 @@ export function IdeEventDebugPanel({ events }: { events: IdeMonitorEvent[] }) {
           events.map((event) => (
             <div key={`${event.timestamp}-${event.activityType}-${event.filePath ?? "none"}`} className="event-card">
               <p className="event-card__timestamp">{new Date(event.timestamp).toLocaleString()}</p>
-              <p className="event-card__title">{event.activityType}</p>
+              <p className="event-card__title">
+                <span className="event-card__icon" aria-hidden>
+                  <Icon name="events" size={14} />
+                </span>
+                {event.activityType}
+              </p>
               <p className="event-card__path">{event.filePath ?? "n/a"}</p>
               <p className="event-card__meta">{event.languageId ?? "unknown"}</p>
             </div>
@@ -397,7 +457,7 @@ export function IdeEventDebugPanel({ events }: { events: IdeMonitorEvent[] }) {
   );
 }
 
-export function PostAcceptReworkPanel({ rows }: { rows: PostAcceptTaskReworkRow[] }) {
+export function PostAcceptReworkPanel({ rows, isDark }: { rows: PostAcceptTaskReworkRow[]; isDark: boolean }) {
   const [selectedModel, setSelectedModel] = useState("ALL");
   const [minCharDelta, setMinCharDelta] = useState("0");
   const [maxSecondsToFirstEdit, setMaxSecondsToFirstEdit] = useState("ALL");
@@ -422,7 +482,12 @@ export function PostAcceptReworkPanel({ rows }: { rows: PostAcceptTaskReworkRow[
       <div className="panel-heading">
         <div>
           <p className="panel-heading__eyebrow">Quality Follow-Up</p>
-          <h2 className="panel-heading__title">Post-accept rework</h2>
+          <h2 className="panel-heading__title panel-heading__title--with-icon">
+            <span className="icon-badge icon-badge--warning" aria-hidden>
+              <Icon name="edit" size={16} />
+            </span>
+            Post-accept rework
+          </h2>
           <p className="panel-heading__subtitle">Inspect the tasks that triggered the largest manual corrections after acceptance.</p>
         </div>
       </div>
@@ -432,7 +497,10 @@ export function PostAcceptReworkPanel({ rows }: { rows: PostAcceptTaskReworkRow[
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <label className="control-row">
-              <span>Model</span>
+              <span className="control-label">
+                <Icon name="terminal" size={14} />
+                Model
+              </span>
               <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} className="control-input">
                 {models.map((model) => (
                   <option key={model} value={model}>
@@ -442,11 +510,17 @@ export function PostAcceptReworkPanel({ rows }: { rows: PostAcceptTaskReworkRow[
               </select>
             </label>
             <label className="control-row">
-              <span>Min Char Delta</span>
+              <span className="control-label">
+                <Icon name="type" size={14} />
+                Min Char Delta
+              </span>
               <input value={minCharDelta} onChange={(event) => setMinCharDelta(event.target.value)} className="control-input" inputMode="numeric" />
             </label>
             <label className="control-row">
-              <span>First Edit Within</span>
+              <span className="control-label">
+                <Icon name="timer" size={14} />
+                First Edit Within
+              </span>
               <select value={maxSecondsToFirstEdit} onChange={(event) => setMaxSecondsToFirstEdit(event.target.value)} className="control-input">
                 <option value="ALL">Any time</option>
                 <option value="10">10s</option>
@@ -462,11 +536,11 @@ export function PostAcceptReworkPanel({ rows }: { rows: PostAcceptTaskReworkRow[
             <>
               <div className="h-56">
                 <ResponsiveContainer>
-                    <LineChart data={chartData}>
+                  <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                     <XAxis dataKey="task" stroke={CHART_AXIS_STROKE} tick={{ fontSize: 11 }} />
                     <YAxis stroke={CHART_AXIS_STROKE} tick={{ fontSize: 11 }} />
-                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                    <Tooltip contentStyle={buildChartTooltipStyle(isDark)} />
                     <Line type="monotone" dataKey="maxCharDelta" stroke="#2563eb" strokeWidth={2} dot={{ r: 3, fill: "#2563eb" }} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -518,60 +592,25 @@ function CardEmptyState({
 }) {
   return (
     <div className={`empty-state ${compact ? "empty-state--compact" : ""}`}>
-      <EmptyIcon icon={icon} />
+      <span className="empty-state__icon" aria-hidden>
+        <Icon name={iconToIconName(icon)} size={22} />
+      </span>
       <p className="empty-state__title">{title}</p>
       <p className="empty-state__subtitle">{subtitle}</p>
     </div>
   );
 }
 
-function EmptyIcon({ icon }: { icon: "chart" | "table" | "events" | "kpi" }) {
-  if (icon === "table") {
-    return (
-      <svg width="48" height="30" viewBox="0 0 48 30" fill="none" aria-hidden>
-        <rect x="1" y="1" width="46" height="28" rx="8" stroke="var(--border-strong)" />
-        <line x1="1" y1="10" x2="47" y2="10" stroke="var(--border-strong)" />
-        <line x1="16.5" y1="10" x2="16.5" y2="29" stroke="var(--border-default)" />
-        <line x1="32.5" y1="10" x2="32.5" y2="29" stroke="var(--border-default)" />
-      </svg>
-    );
-  }
-  if (icon === "events") {
-    return (
-      <svg width="48" height="30" viewBox="0 0 48 30" fill="none" aria-hidden>
-        <circle cx="8" cy="8" r="3" fill="var(--interactive-primary)" />
-        <circle cx="8" cy="15" r="3" fill="var(--text-tertiary)" />
-        <circle cx="8" cy="22" r="3" fill="var(--text-tertiary)" />
-        <line x1="15" y1="8.5" x2="42" y2="8.5" stroke="var(--border-strong)" />
-        <line x1="15" y1="15.5" x2="42" y2="15.5" stroke="var(--border-strong)" />
-        <line x1="15" y1="22.5" x2="35" y2="22.5" stroke="var(--border-strong)" />
-      </svg>
-    );
-  }
-  if (icon === "kpi") {
-    return (
-      <svg width="48" height="30" viewBox="0 0 48 30" fill="none" aria-hidden>
-        <rect x="3" y="16" width="7" height="10" rx="2" fill="var(--border-strong)" />
-        <rect x="14" y="12" width="7" height="14" rx="2" fill="var(--text-tertiary)" />
-        <rect x="25" y="8" width="7" height="18" rx="2" fill="var(--text-secondary)" />
-        <rect x="36" y="4" width="7" height="22" rx="2" fill="var(--interactive-primary)" />
-      </svg>
-    );
-  }
-  return (
-    <svg width="48" height="30" viewBox="0 0 48 30" fill="none" aria-hidden>
-      <rect x="1" y="1" width="46" height="28" rx="8" stroke="var(--border-strong)" />
-      <polyline points="7,21 15,15 22,18 31,10 40,13" stroke="var(--interactive-primary)" strokeWidth="1.6" fill="none" />
-      <circle cx="31" cy="10" r="2" fill="var(--interactive-primary)" />
-    </svg>
-  );
-}
-
-function ChartHeader({ title, subtitle, badge }: { title: string; subtitle: string; badge: string }) {
+function ChartHeader({ icon, title, subtitle, badge }: { icon: IconName; title: string; subtitle: string; badge: string }) {
   return (
     <div className="chart-header">
       <div>
-        <h3 className="chart-header__title">{title}</h3>
+        <h3 className="chart-header__title chart-header__title--with-icon">
+          <span className="icon-badge icon-badge--info" aria-hidden>
+            <Icon name={icon} size={16} />
+          </span>
+          {title}
+        </h3>
         <p className="chart-header__subtitle">{subtitle}</p>
       </div>
       <span className="soft-badge">{badge}</span>
@@ -579,19 +618,34 @@ function ChartHeader({ title, subtitle, badge }: { title: string; subtitle: stri
   );
 }
 
-function SummaryPill({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "success" | "info" }) {
+function SummaryPill({
+  icon,
+  label,
+  value,
+  tone = "default"
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+  tone?: "default" | "success" | "info";
+}) {
   return (
     <div className={`summary-pill summary-pill--${tone}`}>
+      <span className="chip-icon" aria-hidden>
+        <Icon name={icon} size={14} />
+      </span>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
   );
 }
 
-function Badge({ label, tone }: { label: string; tone: "success" | "danger" }) {
+function Badge({ icon, label, tone }: { icon: IconName; label: string; tone: "success" | "danger" }) {
   return (
     <span className={`status-chip status-chip--${tone}`}>
-      <span className="status-chip__dot" aria-hidden />
+      <span className="status-chip__dot" aria-hidden>
+        <Icon name={icon} size={12} />
+      </span>
       {label}
     </span>
   );
@@ -627,4 +681,11 @@ function buildChartTooltipStyle(isDark: boolean) {
     color: isDark ? "#fafafa" : "#0a0a0a",
     boxShadow: isDark ? "0 4px 12px rgba(0, 0, 0, 0.24)" : "0 1px 2px rgba(0, 0, 0, 0.06)"
   };
+}
+
+function iconToIconName(icon: "chart" | "table" | "events" | "kpi"): IconName {
+  if (icon === "table") return "table";
+  if (icon === "events") return "events";
+  if (icon === "kpi") return "rate";
+  return "chart";
 }
