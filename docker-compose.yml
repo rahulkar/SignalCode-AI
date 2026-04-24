@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: litellm-postgres
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    volumes:
+      - ./litellm/postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-proxy
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./litellm/.env
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      DATABASE_URL: postgresql://litellm:litellm@postgres:5432/litellm
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=5)",
+        ]
+      interval: 5s
+      timeout: 8s
+      retries: 18
+      start_period: 45s
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: signalcode-dashboard
+    ports:
+      - "5173:80"
+    depends_on:
+      - postgres
+      - backend
+      - litellm
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: signalcode-backend
+    environment:
+      PORT: 3001
+      DATABASE_PATH: /app/data/telemetry.db
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_MODEL: gemini-flash
+      CORS_ORIGIN: http://localhost:5173
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./backend/data:/app/data
+    depends_on:
+      litellm:
+        condition: service_healthy

@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: litellm-postgres
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-proxy
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      DATABASE_URL: postgresql://litellm:litellm@postgres:5432/litellm
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    depends_on:
+      - postgres

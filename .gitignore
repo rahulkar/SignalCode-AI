@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+.idea/
+.gradle/
+*.iml
+*.log
+.DS_Store
+
+# Secrets
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Local databases
+backend/telemetry.db
+backend/data/
+litellm/data/
+litellm/litellm.db
+litellm/postgres-data/
+
+# IntelliJ plugin sandbox artifacts
+plugin/.intellijPlatform/
+plugin/build/
