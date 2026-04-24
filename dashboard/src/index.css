@@ -3,24 +3,55 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --surface-ground: #fafafa;
-    --surface-card: #ffffff;
-    --surface-elevated: #f5f5f5;
-    --surface-hover: rgba(0, 0, 0, 0.04);
-    --border-default: #e5e5e5;
-    --border-strong: #d4d4d4;
-    --border-subtle: #ededed;
-    --text-primary: #0a0a0a;
-    --text-secondary: #525252;
-    --text-tertiary: #737373;
+  :root,
+  html[data-theme="light"] {
+    --surface-ground: #f4f6f8;
+    --surface-ground-strong: #eef1f5;
+    --surface-card: rgba(255, 255, 255, 0.72);
+    --surface-card-strong: rgba(255, 255, 255, 0.9);
+    --surface-elevated: rgba(248, 250, 252, 0.88);
+    --surface-elevated-strong: rgba(243, 246, 249, 0.96);
+    --surface-segment: rgba(238, 242, 247, 0.82);
+    --surface-hover: rgba(15, 23, 42, 0.04);
+    --border-default: rgba(15, 23, 42, 0.1);
+    --border-strong: rgba(15, 23, 42, 0.16);
+    --border-subtle: rgba(15, 23, 42, 0.06);
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-tertiary: #64748b;
     --interactive-primary: #2563eb;
     --interactive-primary-hover: #1d4ed8;
     --success: #16a34a;
     --danger: #dc2626;
     --warning: #d97706;
-    --shadow-popover: 0 1px 2px rgba(0, 0, 0, 0.06);
-    --shadow-modal: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-popover: 0 12px 28px rgba(15, 23, 42, 0.08);
+    --shadow-card: 0 18px 36px rgba(15, 23, 42, 0.06);
+    --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.05);
+  }
+
+  html[data-theme="dark"] {
+    --surface-ground: #0b1120;
+    --surface-ground-strong: #121a2b;
+    --surface-card: rgba(15, 23, 42, 0.72);
+    --surface-card-strong: rgba(15, 23, 42, 0.88);
+    --surface-elevated: rgba(20, 30, 48, 0.88);
+    --surface-elevated-strong: rgba(24, 35, 54, 0.96);
+    --surface-segment: rgba(30, 41, 59, 0.78);
+    --surface-hover: rgba(148, 163, 184, 0.08);
+    --border-default: rgba(148, 163, 184, 0.16);
+    --border-strong: rgba(148, 163, 184, 0.24);
+    --border-subtle: rgba(148, 163, 184, 0.1);
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-tertiary: #94a3b8;
+    --interactive-primary: #60a5fa;
+    --interactive-primary-hover: #3b82f6;
+    --success: #4ade80;
+    --danger: #f87171;
+    --warning: #fbbf24;
+    --shadow-popover: 0 18px 36px rgba(2, 6, 23, 0.3);
+    --shadow-card: 0 24px 48px rgba(2, 6, 23, 0.22);
+    --shadow-soft: 0 1px 2px rgba(2, 6, 23, 0.24);
   }
 
   html,
@@ -31,11 +62,23 @@
 
   body {
     @apply m-0 antialiased;
-    background: var(--surface-ground);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0)) 0 0 / 100% 180px no-repeat,
+      linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+      linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+      var(--surface-ground);
+    background-size:
+      100% 180px,
+      24px 24px,
+      24px 24px,
+      auto;
     color: var(--text-primary);
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
     line-height: 1.5;
+    transition:
+      background-color 160ms ease-out,
+      color 160ms ease-out;
   }
 
   * {
@@ -58,7 +101,9 @@
   .topbar {
     @apply sticky top-0 z-20 border-b;
     border-color: var(--border-default);
-    background: var(--surface-card);
+    background: color-mix(in srgb, var(--surface-card-strong) 88%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+    box-shadow: var(--shadow-soft);
   }
 
   .topbar__inner {
@@ -98,12 +143,24 @@
     @apply flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end;
   }
 
+  .theme-toggle,
   .info-chip,
   .summary-pill {
-    @apply inline-flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] font-medium;
+    @apply inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] font-medium;
     border-color: var(--border-default);
-    background: var(--surface-card);
+    background: color-mix(in srgb, var(--surface-card) 84%, transparent);
     color: var(--text-secondary);
+    backdrop-filter: blur(10px);
+  }
+
+  .theme-toggle {
+    color: var(--interactive-primary);
+  }
+
+  .theme-toggle:hover,
+  .info-chip:hover,
+  .summary-pill:hover {
+    background: color-mix(in srgb, var(--surface-elevated) 92%, transparent);
   }
 
   .info-chip strong,
@@ -125,9 +182,12 @@
   }
 
   .hero-banner {
-    @apply mb-4 rounded-md border;
+    @apply mb-4 rounded-xl border;
     border-color: var(--border-default);
-    background: var(--surface-card);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--surface-card-strong) 100%, transparent), color-mix(in srgb, var(--surface-elevated) 96%, transparent));
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(14px) saturate(130%);
   }
 
   .hero-banner__content {
@@ -144,9 +204,10 @@
   }
 
   .hero-stat {
-    @apply rounded-md border px-4 py-3;
+    @apply rounded-lg border px-4 py-3;
     border-color: var(--border-default);
-    background: var(--surface-elevated);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--surface-card) 95%, transparent), color-mix(in srgb, var(--surface-elevated) 98%, transparent));
   }
 
   .hero-stat span {
@@ -181,14 +242,35 @@
 
   .card,
   .metric-card {
-    @apply rounded-md border p-4 sm:p-4;
+    @apply rounded-xl border p-4;
     border-color: var(--border-default);
-    background: var(--surface-card);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--surface-card-strong) 98%, transparent), color-mix(in srgb, var(--surface-elevated) 100%, transparent));
+    backdrop-filter: blur(14px) saturate(130%);
+    box-shadow: var(--shadow-card);
   }
 
   .card--elevated,
   .metric-card {
-    box-shadow: none;
+    position: relative;
+  }
+
+  .card--elevated::before,
+  .metric-card::before,
+  .hero-banner::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 26%);
+    opacity: 0.55;
+  }
+
+  html[data-theme="dark"] .card--elevated::before,
+  html[data-theme="dark"] .metric-card::before,
+  html[data-theme="dark"] .hero-banner::before {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 22%);
   }
 
   .section-heading,
@@ -206,8 +288,8 @@
 
   .soft-badge {
     @apply inline-flex items-center self-start rounded-md border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em] sm:self-auto;
-    border-color: #dbe4ff;
-    background: #eff6ff;
+    border-color: color-mix(in srgb, var(--interactive-primary) 22%, var(--border-default));
+    background: color-mix(in srgb, var(--interactive-primary) 10%, var(--surface-card));
     color: var(--interactive-primary);
   }
 
@@ -220,7 +302,11 @@
   }
 
   .metric-card__accent {
-    display: none;
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--interactive-primary) 74%, transparent), transparent 80%);
+    opacity: 0.8;
   }
 
   .metric-card__label {
@@ -246,7 +332,7 @@
   .control-input {
     @apply min-h-8 rounded-md border px-3 text-[13px] outline-none transition;
     border-color: var(--border-default);
-    background: var(--surface-card);
+    background: color-mix(in srgb, var(--surface-card-strong) 96%, transparent);
     color: var(--text-primary);
   }
 
@@ -256,7 +342,7 @@
 
   .control-input:focus-visible {
     border-color: var(--interactive-primary);
-    outline: 2px solid rgba(37, 99, 235, 0.18);
+    outline: 2px solid color-mix(in srgb, var(--interactive-primary) 18%, transparent);
     outline-offset: 1px;
     box-shadow: none;
   }
@@ -280,22 +366,22 @@
 
   .btn-secondary {
     border: 1px solid var(--border-default);
-    background: var(--surface-card);
+    background: color-mix(in srgb, var(--surface-card) 94%, transparent);
     color: var(--text-primary);
   }
 
   .btn-secondary:hover {
-    background: var(--surface-elevated);
+    background: color-mix(in srgb, var(--surface-elevated) 94%, transparent);
   }
 
   .btn-danger {
-    border: 1px solid #fecaca;
-    background: #ffffff;
+    border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border-default));
+    background: color-mix(in srgb, var(--danger) 8%, var(--surface-card));
     color: var(--danger);
   }
 
   .btn-danger:hover {
-    background: #fef2f2;
+    background: color-mix(in srgb, var(--danger) 12%, var(--surface-card));
   }
 
   .btn-primary:disabled,
@@ -306,13 +392,14 @@
   }
 
   .danger-card {
-    @apply flex flex-col gap-3 rounded-md border p-4;
-    border-color: #fecaca;
-    background: #fffafa;
+    @apply flex flex-col gap-3 rounded-lg border p-4;
+    border-color: color-mix(in srgb, var(--danger) 28%, var(--border-default));
+    background: color-mix(in srgb, var(--danger) 5%, var(--surface-elevated));
   }
 
   .status-chip {
     @apply inline-flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em];
+    backdrop-filter: blur(8px);
   }
 
   .status-chip__dot {
@@ -321,8 +408,8 @@
   }
 
   .status-chip--success {
-    border-color: #d1fae5;
-    background: #f0fdf4;
+    border-color: color-mix(in srgb, var(--success) 24%, var(--border-default));
+    background: color-mix(in srgb, var(--success) 8%, var(--surface-card));
     color: var(--success);
   }
 
@@ -331,8 +418,8 @@
   }
 
   .status-chip--danger {
-    border-color: #fecaca;
-    background: #fef2f2;
+    border-color: color-mix(in srgb, var(--danger) 24%, var(--border-default));
+    background: color-mix(in srgb, var(--danger) 8%, var(--surface-card));
     color: var(--danger);
   }
 
@@ -341,9 +428,14 @@
   }
 
   .table-shell {
-    @apply overflow-x-auto rounded-md border;
+    @apply overflow-x-auto rounded-lg border;
     border-color: var(--border-default);
-    background: var(--surface-card);
+    background: color-mix(in srgb, var(--surface-card-strong) 96%, transparent);
+  }
+
+  .table-shell--activity {
+    max-height: 284px;
+    overflow: auto;
   }
 
   .data-table {
@@ -351,7 +443,14 @@
   }
 
   .data-table thead {
-    background: var(--surface-elevated);
+    background: color-mix(in srgb, var(--surface-segment) 100%, transparent);
+  }
+
+  .table-shell--activity thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: color-mix(in srgb, var(--surface-segment) 100%, transparent);
   }
 
   .data-table th {
@@ -377,29 +476,29 @@
   }
 
   .outcome-pill--success {
-    background: #f0fdf4;
+    background: color-mix(in srgb, var(--success) 12%, var(--surface-card));
     color: var(--success);
   }
 
   .outcome-pill--danger {
-    background: #fef2f2;
+    background: color-mix(in srgb, var(--danger) 12%, var(--surface-card));
     color: var(--danger);
   }
 
   .outcome-pill--info {
-    background: #eff6ff;
+    background: color-mix(in srgb, var(--interactive-primary) 12%, var(--surface-card));
     color: var(--interactive-primary);
   }
 
   .outcome-pill--neutral {
-    background: #f5f5f5;
+    background: color-mix(in srgb, var(--text-tertiary) 10%, var(--surface-card));
     color: var(--text-secondary);
   }
 
   .event-card {
-    @apply rounded-md border p-3;
+    @apply rounded-lg border p-3;
     border-color: var(--border-default);
-    background: var(--surface-card);
+    background: color-mix(in srgb, var(--surface-card) 94%, transparent);
   }
 
   .event-card__timestamp {
@@ -424,9 +523,9 @@
   }
 
   .empty-state {
-    @apply mt-2 flex min-h-40 flex-col items-center justify-center rounded-md border px-4 py-6 text-center;
+    @apply mt-2 flex min-h-40 flex-col items-center justify-center rounded-lg border px-4 py-6 text-center;
     border-color: var(--border-default);
-    background: var(--surface-elevated);
+    background: color-mix(in srgb, var(--surface-elevated-strong) 98%, transparent);
   }
 
   .empty-state--compact {
@@ -464,10 +563,10 @@
   }
 
   .error-banner {
-    @apply rounded-md border px-4 py-3 text-[13px];
-    border-color: #fecaca;
-    background: #fef2f2;
-    color: #991b1b;
+    @apply rounded-lg border px-4 py-3 text-[13px];
+    border-color: color-mix(in srgb, var(--danger) 24%, var(--border-default));
+    background: color-mix(in srgb, var(--danger) 8%, var(--surface-card));
+    color: var(--danger);
   }
 
   .distribution-legend {
@@ -475,9 +574,9 @@
   }
 
   .distribution-legend__row {
-    @apply flex items-center justify-between rounded-md border px-3 py-3;
+    @apply flex items-center justify-between rounded-lg border px-3 py-3;
     border-color: var(--border-default);
-    background: var(--surface-card);
+    background: color-mix(in srgb, var(--surface-card) 95%, transparent);
   }
 
   .distribution-legend__label {
@@ -533,6 +632,10 @@
     .data-table th,
     .data-table td {
       @apply px-2.5 py-2.5;
+    }
+
+    .table-shell--activity {
+      max-height: 264px;
     }
   }
 }

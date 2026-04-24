@@ -19,6 +19,7 @@ import { ActivityTable, ChartPanel, ControlPanel, IdeEventDebugPanel, KpiGrid, P
 
 const AUTO_REFRESH_OPTIONS = [0, 5000, 10000, 30000] as const;
 const TIME_RANGES = ["15m", "1h", "24h", "7d"] as const;
+type ThemeMode = "light" | "dark";
 const PIE_TOOLTIP_STYLE = {
   backgroundColor: "#ffffff",
   border: "1px solid #e5e5e5",
@@ -41,6 +42,10 @@ export function App() {
   const [outcomeFilter, setOutcomeFilter] = useState<"ALL" | "ACCEPTED" | "REJECTED" | "ITERATED" | "DIFF_RENDERED">("ALL");
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const stored = window.localStorage.getItem("signalcode-theme");
+    return stored === "dark" ? "dark" : "light";
+  });
 
   const load = async (range: StatsRange) => {
     const [statsRes, healthRes, ideRes, ideEventsRes, postAcceptRes] = await Promise.allSettled([
@@ -90,6 +95,11 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [autoRefreshMs, timeRange]);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("signalcode-theme", theme);
+  }, [theme]);
+
   const filteredActivity = useMemo(() => {
     const rows = stats?.recentActivity ?? [];
     return rows.filter((row) => {
@@ -123,6 +133,7 @@ export function App() {
   );
   const pieData = windowOutcomeData.filter((item) => item.value > 0);
   const totalOutcomeCount = windowOutcomeData.reduce((sum, item) => sum + item.value, 0);
+  const isDark = theme === "dark";
 
   const onResetDatabase = async () => {
     const ok = window.confirm("Clear all telemetry events and tasks?");
@@ -167,6 +178,9 @@ export function App() {
           </div>
           <div className="topbar__actions">
             <div className="hero-chip-group">
+              <button className="theme-toggle" onClick={() => setTheme(isDark ? "light" : "dark")} type="button">
+                {isDark ? "Light mode" : "Dark mode"}
+              </button>
               <InfoChip label="Window" value={timeRange.toUpperCase()} />
               <InfoChip label="Refresh" value={autoRefreshMs === 0 ? "Manual" : `${autoRefreshMs / 1000}s`} />
               <InfoChip label="Last Sync" value={formatLastSync(lastLoadedAt)} />
@@ -195,7 +209,7 @@ export function App() {
         <div className="dashboard-grid">
           <section className="space-y-4">
             <KpiGrid stats={stats} isLoading={isLoading} />
-            <ChartPanel timeSeries={stats?.timeSeries ?? []} timeRange={timeRange} />
+            <ChartPanel timeSeries={stats?.timeSeries ?? []} timeRange={timeRange} isDark={isDark} />
 
             <motion.section layout className="card card--elevated">
               <div className="panel-heading">
@@ -225,7 +239,7 @@ export function App() {
                           ))}
                         </Pie>
                         <Tooltip
-                          contentStyle={PIE_TOOLTIP_STYLE}
+                          contentStyle={buildTooltipStyle(isDark)}
                           formatter={(value: number, name: string) => [value, name]}
                         />
                       </PieChart>
@@ -302,14 +316,24 @@ export function App() {
   );
 }
 
+function buildTooltipStyle(isDark: boolean) {
+  return {
+    ...PIE_TOOLTIP_STYLE,
+    backgroundColor: isDark ? "#171717" : "#ffffff",
+    border: isDark ? "1px solid #333333" : "1px solid #e5e5e5",
+    color: isDark ? "#fafafa" : "#0a0a0a",
+    boxShadow: isDark ? "0 4px 12px rgba(0, 0, 0, 0.24)" : "0 1px 2px rgba(0, 0, 0, 0.06)"
+  };
+}
+
 function PanelEmptyState({ label, compact = false }: { label: string; compact?: boolean }) {
   return (
     <div className={`empty-state ${compact ? "empty-state--compact" : ""}`}>
       <svg width={compact ? 76 : 96} height={compact ? 44 : 56} viewBox="0 0 96 56" role="img" aria-label="Empty state">
-        <rect x="8" y="8" width="80" height="40" rx="10" fill="#0f172a" stroke="#334155" />
-        <line x1="18" y1="22" x2="78" y2="22" stroke="#475569" />
-        <line x1="18" y1="30" x2="64" y2="30" stroke="#334155" />
-        <line x1="18" y1="37" x2="58" y2="37" stroke="#334155" />
+        <rect x="8" y="8" width="80" height="40" rx="10" fill="var(--surface-card-strong)" stroke="var(--border-strong)" />
+        <line x1="18" y1="22" x2="78" y2="22" stroke="var(--text-tertiary)" />
+        <line x1="18" y1="30" x2="64" y2="30" stroke="var(--border-strong)" />
+        <line x1="18" y1="37" x2="58" y2="37" stroke="var(--border-strong)" />
       </svg>
       <p className="empty-state__subtitle">{label}</p>
     </div>

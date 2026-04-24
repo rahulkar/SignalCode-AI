@@ -87,10 +87,12 @@ export function KpiGrid({ stats, isLoading }: { stats: StatsResponse | null; isL
 
 export function ChartPanel({
   timeSeries,
-  timeRange
+  timeRange,
+  isDark
 }: {
   timeSeries: StatsResponse["timeSeries"];
   timeRange: StatsRange;
+  isDark: boolean;
 }) {
   const hasTimeSeries = timeSeries.some(
     (point) => point.accepted > 0 || point.rejected > 0 || point.iterated > 0 || point.diffRendered > 0
@@ -151,7 +153,7 @@ export function ChartPanel({
                   />
                   <YAxis stroke={CHART_AXIS_STROKE} tick={{ fontSize: 11 }} allowDecimals={false} />
                   <Tooltip
-                    contentStyle={CHART_TOOLTIP_STYLE}
+                    contentStyle={buildChartTooltipStyle(isDark)}
                     labelFormatter={(value) => new Date(value).toLocaleString()}
                     formatter={(value: number, name: string) => [value, toTitleCase(name)]}
                   />
@@ -207,7 +209,7 @@ export function ChartPanel({
                     tickFormatter={(value) => `${value}%`}
                   />
                   <Tooltip
-                    contentStyle={CHART_TOOLTIP_STYLE}
+                    contentStyle={buildChartTooltipStyle(isDark)}
                     labelFormatter={(value) => new Date(value).toLocaleString()}
                     formatter={(value: number) => [`${value.toFixed(1)}%`, "Acceptance Momentum"]}
                   />
@@ -239,11 +241,12 @@ export function ActivityTable({ rows }: { rows: StatsResponse["recentActivity"] 
           <p className="panel-heading__eyebrow">Activity Feed</p>
           <h2 className="panel-heading__title">Recent task events</h2>
         </div>
+        {rows.length > 5 ? <span className="soft-badge">5-row window</span> : null}
       </div>
       {rows.length === 0 ? (
         <CardEmptyState title="No activity rows" subtitle="Try a broader time range or wait for new events." icon="table" />
       ) : (
-        <div className="table-shell">
+        <div className="table-shell table-shell--activity">
           <table className="data-table">
             <thead>
               <tr>
@@ -526,40 +529,40 @@ function EmptyIcon({ icon }: { icon: "chart" | "table" | "events" | "kpi" }) {
   if (icon === "table") {
     return (
       <svg width="48" height="30" viewBox="0 0 48 30" fill="none" aria-hidden>
-        <rect x="1" y="1" width="46" height="28" rx="8" stroke="#44516a" />
-        <line x1="1" y1="10" x2="47" y2="10" stroke="#44516a" />
-        <line x1="16.5" y1="10" x2="16.5" y2="29" stroke="#314056" />
-        <line x1="32.5" y1="10" x2="32.5" y2="29" stroke="#314056" />
+        <rect x="1" y="1" width="46" height="28" rx="8" stroke="var(--border-strong)" />
+        <line x1="1" y1="10" x2="47" y2="10" stroke="var(--border-strong)" />
+        <line x1="16.5" y1="10" x2="16.5" y2="29" stroke="var(--border-default)" />
+        <line x1="32.5" y1="10" x2="32.5" y2="29" stroke="var(--border-default)" />
       </svg>
     );
   }
   if (icon === "events") {
     return (
       <svg width="48" height="30" viewBox="0 0 48 30" fill="none" aria-hidden>
-        <circle cx="8" cy="8" r="3" fill="#4f7cff" />
-        <circle cx="8" cy="15" r="3" fill="#58667f" />
-        <circle cx="8" cy="22" r="3" fill="#58667f" />
-        <line x1="15" y1="8.5" x2="42" y2="8.5" stroke="#44516a" />
-        <line x1="15" y1="15.5" x2="42" y2="15.5" stroke="#44516a" />
-        <line x1="15" y1="22.5" x2="35" y2="22.5" stroke="#44516a" />
+        <circle cx="8" cy="8" r="3" fill="var(--interactive-primary)" />
+        <circle cx="8" cy="15" r="3" fill="var(--text-tertiary)" />
+        <circle cx="8" cy="22" r="3" fill="var(--text-tertiary)" />
+        <line x1="15" y1="8.5" x2="42" y2="8.5" stroke="var(--border-strong)" />
+        <line x1="15" y1="15.5" x2="42" y2="15.5" stroke="var(--border-strong)" />
+        <line x1="15" y1="22.5" x2="35" y2="22.5" stroke="var(--border-strong)" />
       </svg>
     );
   }
   if (icon === "kpi") {
     return (
       <svg width="48" height="30" viewBox="0 0 48 30" fill="none" aria-hidden>
-        <rect x="3" y="16" width="7" height="10" rx="2" fill="#44516a" />
-        <rect x="14" y="12" width="7" height="14" rx="2" fill="#58667f" />
-        <rect x="25" y="8" width="7" height="18" rx="2" fill="#7d8aa5" />
-        <rect x="36" y="4" width="7" height="22" rx="2" fill="#4f7cff" />
+        <rect x="3" y="16" width="7" height="10" rx="2" fill="var(--border-strong)" />
+        <rect x="14" y="12" width="7" height="14" rx="2" fill="var(--text-tertiary)" />
+        <rect x="25" y="8" width="7" height="18" rx="2" fill="var(--text-secondary)" />
+        <rect x="36" y="4" width="7" height="22" rx="2" fill="var(--interactive-primary)" />
       </svg>
     );
   }
   return (
     <svg width="48" height="30" viewBox="0 0 48 30" fill="none" aria-hidden>
-      <rect x="1" y="1" width="46" height="28" rx="8" stroke="#44516a" />
-      <polyline points="7,21 15,15 22,18 31,10 40,13" stroke="#82a2ff" strokeWidth="1.6" fill="none" />
-      <circle cx="31" cy="10" r="2" fill="#82a2ff" />
+      <rect x="1" y="1" width="46" height="28" rx="8" stroke="var(--border-strong)" />
+      <polyline points="7,21 15,15 22,18 31,10 40,13" stroke="var(--interactive-primary)" strokeWidth="1.6" fill="none" />
+      <circle cx="31" cy="10" r="2" fill="var(--interactive-primary)" />
     </svg>
   );
 }
@@ -614,4 +617,14 @@ function toTitleCase(value: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function buildChartTooltipStyle(isDark: boolean) {
+  return {
+    ...CHART_TOOLTIP_STYLE,
+    backgroundColor: isDark ? "#171717" : "#ffffff",
+    border: isDark ? "1px solid #333333" : "1px solid #e5e5e5",
+    color: isDark ? "#fafafa" : "#0a0a0a",
+    boxShadow: isDark ? "0 4px 12px rgba(0, 0, 0, 0.24)" : "0 1px 2px rgba(0, 0, 0, 0.06)"
+  };
 }
