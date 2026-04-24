@@ -13,8 +13,10 @@ import type {
   IdeMonitorEvent,
   PostAcceptTaskReworkRow,
   RecentActivityRow,
+  StatsRange,
   StatsResponse,
-  TelemetryRequest
+  TelemetryRequest,
+  TimeSeriesPoint
 } from "./types.js";
 
 const port = Number(process.env.PORT ?? 3001);
@@ -27,6 +29,15 @@ initializeDb();
 type GenerateFn = typeof generateSearchReplace;
 type ListModelsFn = typeof fetchAvailableModelIds;
 type SupportedModel = (typeof supportedModels)[number];
+type RangeConfig = { windowMs: number; bucketMs: number };
+type TimeSeriesRow = { created_at: string; type: "DIFF_RENDERED" | "ACCEPTED" | "REJECTED" | "ITERATED" };
+
+const STATS_RANGE_CONFIG: Record<StatsRange, RangeConfig> = {
+  "15m": { windowMs: 15 * 60 * 1000, bucketMs: 60 * 1000 },
+  "1h": { windowMs: 60 * 60 * 1000, bucketMs: 5 * 60 * 1000 },
+  "24h": { windowMs: 24 * 60 * 60 * 1000, bucketMs: 60 * 60 * 1000 },
+  "7d": { windowMs: 7 * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000 }
+};
 
 function isSupportedModel(model: string): model is SupportedModel {
   return supportedModels.includes(model as SupportedModel);
@@ -184,8 +195,11 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   }
   });
 
-  app.get("/api/stats", (_req, res) => {
+  app.get("/api/stats", (req, res) => {
   const postAcceptExclusion = `COALESCE(e.metadata, '') NOT LIKE '%"source":"post-accept"%'`;
+  const range = parseStatsRange(req.query.range);
+  const rangeConfig = STATS_RANGE_CONFIG[range];
+  const rangeStartIso = new Date(Date.now() - rangeConfig.windowMs).toISOString();
 
   const totals = db
     .prepare(
@@ -236,18 +250,16 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   const timeSeries = db
     .prepare(
       `SELECT
-         strftime('%Y-%m-%d', e.created_at) AS bucket,
-         SUM(CASE WHEN type = 'ACCEPTED' THEN 1 ELSE 0 END) AS accepted,
-         SUM(CASE WHEN type = 'REJECTED' THEN 1 ELSE 0 END) AS rejected
+         e.created_at AS created_at,
+         e.type AS type
        FROM events e
        INNER JOIN tasks t ON t.task_id = e.task_id
        WHERE t.model != 'ide-monitor'
          AND ${postAcceptExclusion}
-       GROUP BY bucket
-       ORDER BY bucket DESC
-       LIMIT 30`
+         AND e.created_at >= ?
+       ORDER BY e.created_at ASC`
     )
-    .all() as Array<{ bucket: string; accepted: number; rejected: number }>;
+    .all(rangeStartIso) as TimeSeriesRow[];
 
   const recentActivity = db
     .prepare(
@@ -262,10 +274,11 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
        INNER JOIN tasks t ON t.task_id = e.task_id
        WHERE t.model != 'ide-monitor'
          AND ${postAcceptExclusion}
+         AND e.created_at >= ?
        ORDER BY e.created_at DESC
-       LIMIT 20`
+       LIMIT 40`
     )
-    .all() as RecentActivityRow[];
+    .all(rangeStartIso) as RecentActivityRow[];
 
   const diffRendered = totals.diffRendered ?? 0;
   const accepted = totals.accepted ?? 0;
@@ -353,7 +366,7 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
       rejected,
       iterated
     },
-    timeSeries: [...timeSeries].reverse(),
+    timeSeries: buildTimeSeries(timeSeries, rangeConfig),
     recentActivity,
     postAccept: {
       editedTaskRate: Number(editedTaskRate.toFixed(1)),
@@ -551,6 +564,62 @@ function parseMeta(metadata: string | null): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function parseStatsRange(value: unknown): StatsRange {
+  if (value === "15m" || value === "1h" || value === "24h" || value === "7d") {
+    return value;
+  }
+  return "24h";
+}
+
+function buildTimeSeries(rows: TimeSeriesRow[], rangeConfig: RangeConfig): TimeSeriesPoint[] {
+  const now = Date.now();
+  const start = floorToBucket(now - rangeConfig.windowMs, rangeConfig.bucketMs);
+  const end = floorToBucket(now, rangeConfig.bucketMs);
+  const points = new Map<number, TimeSeriesPoint>();
+
+  for (let cursor = start; cursor <= end; cursor += rangeConfig.bucketMs) {
+    points.set(cursor, {
+      bucket: new Date(cursor).toISOString(),
+      accepted: 0,
+      rejected: 0,
+      iterated: 0,
+      diffRendered: 0,
+      acceptanceMomentum: 0
+    });
+  }
+
+  for (const row of rows) {
+    const eventTime = new Date(row.created_at).getTime();
+    if (Number.isNaN(eventTime) || eventTime < start) {
+      continue;
+    }
+    const bucket = floorToBucket(eventTime, rangeConfig.bucketMs);
+    const point = points.get(bucket);
+    if (!point) {
+      continue;
+    }
+    if (row.type === "ACCEPTED") point.accepted += 1;
+    if (row.type === "REJECTED") point.rejected += 1;
+    if (row.type === "ITERATED") point.iterated += 1;
+    if (row.type === "DIFF_RENDERED") point.diffRendered += 1;
+  }
+
+  let cumulativeAccepted = 0;
+  let cumulativeDiffRendered = 0;
+  for (const point of points.values()) {
+    cumulativeAccepted += point.accepted;
+    cumulativeDiffRendered += point.diffRendered;
+    point.acceptanceMomentum =
+      cumulativeDiffRendered === 0 ? 0 : Number(((cumulativeAccepted / cumulativeDiffRendered) * 100).toFixed(1));
+  }
+
+  return [...points.values()];
+}
+
+function floorToBucket(timestampMs: number, bucketMs: number): number {
+  return Math.floor(timestampMs / bucketMs) * bucketMs;
 }
 
 function getMetaString(meta: Record<string, unknown> | undefined, key: string): string | null {

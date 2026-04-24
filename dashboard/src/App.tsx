@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
   fetchHealth,
   fetchIdeActivity,
@@ -11,12 +11,20 @@ import {
   type IdeActivityResponse,
   type IdeMonitorEvent,
   type PostAcceptTaskReworkRow,
+  type StatsRange,
   type StatsResponse
 } from "./api";
 import { ActivityTable, ChartPanel, ControlPanel, IdeEventDebugPanel, KpiGrid, PostAcceptReworkPanel, StatusBadge } from "./components/dashboard";
 
 const AUTO_REFRESH_OPTIONS = [0, 5000, 10000, 30000] as const;
 const TIME_RANGES = ["15m", "1h", "24h", "7d"] as const;
+const PIE_TOOLTIP_STYLE = {
+  backgroundColor: "#0f172a",
+  border: "1px solid rgba(148, 163, 184, 0.18)",
+  borderRadius: "14px",
+  color: "#e2e8f0",
+  boxShadow: "0 24px 48px rgba(2, 6, 23, 0.32)"
+};
 
 export function App() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
@@ -27,13 +35,14 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [autoRefreshMs, setAutoRefreshMs] = useState<number>(10000);
-  const [timeRange, setTimeRange] = useState<(typeof TIME_RANGES)[number]>("24h");
+  const [timeRange, setTimeRange] = useState<StatsRange>("24h");
   const [query, setQuery] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState<"ALL" | "ACCEPTED" | "REJECTED" | "ITERATED" | "DIFF_RENDERED">("ALL");
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = async (range: StatsRange) => {
     const [statsRes, healthRes, ideRes, ideEventsRes, postAcceptRes] = await Promise.allSettled([
-      fetchStats(),
+      fetchStats(range),
       fetchHealth(),
       fetchIdeActivity(),
       fetchIdeEvents(),
@@ -43,6 +52,7 @@ export function App() {
     if (statsRes.status === "fulfilled") {
       setStats(statsRes.value);
       setError(null);
+      setLastLoadedAt(new Date().toISOString());
     } else {
       setError(statsRes.reason instanceof Error ? statsRes.reason.message : "Failed to load dashboard data");
     }
@@ -68,22 +78,15 @@ export function App() {
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    setIsLoading(true);
+    void load(timeRange);
+  }, [timeRange]);
 
   useEffect(() => {
     if (autoRefreshMs === 0) return;
-    const timer = window.setInterval(() => void load(), autoRefreshMs);
+    const timer = window.setInterval(() => void load(timeRange), autoRefreshMs);
     return () => window.clearInterval(timer);
-  }, [autoRefreshMs]);
-
-  const cutoff = useMemo(() => {
-    const now = Date.now();
-    if (timeRange === "15m") return now - 15 * 60 * 1000;
-    if (timeRange === "1h") return now - 60 * 60 * 1000;
-    if (timeRange === "24h") return now - 24 * 60 * 60 * 1000;
-    return now - 7 * 24 * 60 * 60 * 1000;
-  }, [timeRange]);
+  }, [autoRefreshMs, timeRange]);
 
   const filteredActivity = useMemo(() => {
     const rows = stats?.recentActivity ?? [];
@@ -91,40 +94,32 @@ export function App() {
       if (row.model === "ide-monitor") {
         return false;
       }
-      const inRange = new Date(row.timestamp).getTime() >= cutoff;
       const matchesOutcome = outcomeFilter === "ALL" ? true : row.outcome === outcomeFilter;
       const q = query.trim().toLowerCase();
       const matchesQuery = q.length === 0 || row.promptSnippet.toLowerCase().includes(q) || row.model.toLowerCase().includes(q);
-      return inRange && matchesOutcome && matchesQuery;
+      return matchesOutcome && matchesQuery;
     });
-  }, [cutoff, outcomeFilter, query, stats?.recentActivity]);
+  }, [outcomeFilter, query, stats?.recentActivity]);
 
-  const visibleIdeEvents = useMemo(
-    () => ideEvents.filter((event) => event.activityType !== "heartbeat"),
-    [ideEvents]
-  );
-
-  const filteredTimeSeries = useMemo(
-    () => (stats?.timeSeries ?? []).filter((point) => new Date(`${point.bucket}T00:00:00`).getTime() >= cutoff),
-    [cutoff, stats?.timeSeries]
-  );
+  const visibleIdeEvents = useMemo(() => ideEvents.filter((event) => event.activityType !== "heartbeat"), [ideEvents]);
 
   const outcomeData = useMemo(
     () => [
-      { name: "Accepted", value: stats?.totals.accepted ?? 0, color: "#22c55e" },
-      { name: "Rejected", value: stats?.totals.rejected ?? 0, color: "#ef4444" },
-      { name: "Iterated", value: stats?.totals.iterated ?? 0, color: "#3b82f6" }
+      { name: "Accepted", value: stats?.totals.accepted ?? 0, color: "#1fb86a" },
+      { name: "Rejected", value: stats?.totals.rejected ?? 0, color: "#f46d5e" },
+      { name: "Iterated", value: stats?.totals.iterated ?? 0, color: "#4f7cff" }
     ],
     [stats]
   );
-  const hasOutcomeData = outcomeData.some((item) => item.value > 0);
+  const pieData = outcomeData.filter((item) => item.value > 0);
+  const totalOutcomeCount = outcomeData.reduce((sum, item) => sum + item.value, 0);
 
   const onResetDatabase = async () => {
     const ok = window.confirm("Clear all telemetry events and tasks?");
     if (!ok) return;
     try {
       await resetTelemetry();
-      await load();
+      await load(timeRange);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to clear database");
     }
@@ -132,74 +127,143 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <header className="sticky top-0 z-10 border-b border-neutral-800 bg-neutral-950/95">
-        <div className="mx-auto flex w-full max-w-[1280px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <header className="topbar">
+        <div className="topbar__inner">
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">SignalCode Enterprise</p>
-            <h1 className="text-xl font-semibold text-neutral-50">Telemetry Command Center</h1>
+            <p className="topbar__eyebrow">SignalCode Enterprise</p>
+            <h1 className="topbar__title">Telemetry Command Center</h1>
+            <p className="topbar__subtitle">Enterprise-grade visibility into generation flow, acceptance quality, and post-accept rework.</p>
           </div>
-          <StatusBadge healthy={apiHealthy} ideConnected={ideActivity?.ideConnected ?? false} />
+          <div className="topbar__actions">
+            <div className="hero-chip-group">
+              <InfoChip label="Window" value={timeRange.toUpperCase()} />
+              <InfoChip label="Refresh" value={autoRefreshMs === 0 ? "Manual" : `${autoRefreshMs / 1000}s`} />
+              <InfoChip label="Last Sync" value={formatLastSync(lastLoadedAt)} />
+            </div>
+            <StatusBadge healthy={apiHealthy} ideConnected={ideActivity?.ideConnected ?? false} />
+          </div>
         </div>
       </header>
-      <main className="mx-auto grid w-full max-w-[1280px] grid-cols-1 gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="space-y-4">
-          <KpiGrid stats={stats} isLoading={isLoading} />
-          <ChartPanel timeSeries={filteredTimeSeries} />
-          <motion.section layout className="card">
-            <h2 className="card-title">Outcome Distribution</h2>
-            {hasOutcomeData ? (
-              <div className="h-64 sm:h-72">
-                <ResponsiveContainer>
-                  <PieChart>
-                    <Pie data={outcomeData} dataKey="value" nameKey="name" outerRadius={95} label>
-                      {outcomeData.map((entry) => (
-                        <Cell key={entry.name} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <PanelEmptyState label="No outcome distribution yet" />
-            )}
-          </motion.section>
-          <ActivityTable rows={filteredActivity} />
-          <PostAcceptReworkPanel rows={postAcceptRows} />
+
+      <main className="app-main">
+        <section className="hero-banner">
+          <div>
+            <p className="hero-banner__eyebrow">Operations Overview</p>
+            <h2 className="hero-banner__title">A cleaner control room for prompt delivery analytics</h2>
+            <p className="hero-banner__copy">
+              Platform KPIs stay visible at a glance while the trend panels and activity feed follow the selected analysis window.
+            </p>
+          </div>
+          <div className="hero-banner__meta">
+            <HeroStat label="Accepted" value={String(stats?.totals.accepted ?? 0)} accent="success" />
+            <HeroStat label="Rejected" value={String(stats?.totals.rejected ?? 0)} accent="danger" />
+            <HeroStat label="Iterated" value={String(stats?.totals.iterated ?? 0)} accent="info" />
+          </div>
         </section>
-        <aside className="space-y-4 lg:sticky lg:top-[72px] lg:h-fit">
-          <ControlPanel
-            autoRefreshMs={autoRefreshMs}
-            autoRefreshOptions={AUTO_REFRESH_OPTIONS}
-            onAutoRefreshChange={setAutoRefreshMs}
-            timeRange={timeRange}
-            timeRanges={TIME_RANGES}
-            onTimeRangeChange={setTimeRange}
-            query={query}
-            onQueryChange={setQuery}
-            outcomeFilter={outcomeFilter}
-            onOutcomeFilterChange={setOutcomeFilter}
-            onRefresh={() => void load()}
-            onResetDatabase={() => void onResetDatabase()}
-          />
-          <section className="card">
-            <h2 className="card-title">IDE Live Status</h2>
-            {ideActivity?.lastEventAt ? (
-              <dl className="space-y-2 text-[13px]">
-                <MetricRow label="Connected" value={ideActivity?.ideConnected ? "Yes" : "No"} />
-                <MetricRow label="Last event" value={formatDate(ideActivity?.lastEventAt)} />
-                <MetricRow label="Current file" value={ideActivity?.currentFile ?? "n/a"} />
-                <MetricRow label="Last edited" value={ideActivity?.lastEditedFile ?? "n/a"} />
-                <MetricRow label="Last added" value={ideActivity?.lastAddedFile ?? "n/a"} />
-              </dl>
-            ) : (
-              <PanelEmptyState label="IDE has not sent events yet" compact />
-            )}
+
+        <div className="dashboard-grid">
+          <section className="space-y-4">
+            <KpiGrid stats={stats} isLoading={isLoading} />
+            <ChartPanel timeSeries={stats?.timeSeries ?? []} timeRange={timeRange} />
+
+            <motion.section layout className="card card--elevated">
+              <div className="panel-heading">
+                <div>
+                  <p className="panel-heading__eyebrow">Distribution</p>
+                  <h2 className="panel-heading__title">Overall outcome mix</h2>
+                  <p className="panel-heading__subtitle">Zero-value segments are suppressed from the pie so active outcomes stay readable.</p>
+                </div>
+              </div>
+              {pieData.length > 0 ? (
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+                  <div className="h-72 sm:h-80">
+                    <ResponsiveContainer>
+                      <PieChart>
+                        <Pie
+                          data={pieData}
+                          dataKey="value"
+                          nameKey="name"
+                          innerRadius={72}
+                          outerRadius={112}
+                          paddingAngle={3}
+                          stroke="rgba(15, 23, 42, 0.9)"
+                          strokeWidth={2}
+                        >
+                          {pieData.map((entry) => (
+                            <Cell key={entry.name} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={PIE_TOOLTIP_STYLE}
+                          formatter={(value: number, name: string) => [value, name]}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="distribution-legend">
+                    {outcomeData.map((item) => (
+                      <div key={item.name} className="distribution-legend__row">
+                        <div className="distribution-legend__label">
+                          <span className="distribution-legend__dot" style={{ backgroundColor: item.color }} aria-hidden />
+                          <span>{item.name}</span>
+                        </div>
+                        <div className="distribution-legend__values">
+                          <strong>{item.value}</strong>
+                          <span>{totalOutcomeCount === 0 ? "0%" : `${((item.value / totalOutcomeCount) * 100).toFixed(0)}%`}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <PanelEmptyState label="No outcome distribution yet" />
+              )}
+            </motion.section>
+
+            <ActivityTable rows={filteredActivity} />
+            <PostAcceptReworkPanel rows={postAcceptRows} />
           </section>
-          <IdeEventDebugPanel events={visibleIdeEvents} />
-          <AnimatePresence>{error ? <ErrorBanner message={error} /> : null}</AnimatePresence>
-        </aside>
+
+          <aside className="dashboard-aside">
+            <ControlPanel
+              autoRefreshMs={autoRefreshMs}
+              autoRefreshOptions={AUTO_REFRESH_OPTIONS}
+              onAutoRefreshChange={setAutoRefreshMs}
+              timeRange={timeRange}
+              timeRanges={TIME_RANGES}
+              onTimeRangeChange={setTimeRange}
+              query={query}
+              onQueryChange={setQuery}
+              outcomeFilter={outcomeFilter}
+              onOutcomeFilterChange={setOutcomeFilter}
+              onRefresh={() => void load(timeRange)}
+              onResetDatabase={() => void onResetDatabase()}
+            />
+
+            <section className="card card--elevated">
+              <div className="panel-heading">
+                <div>
+                  <p className="panel-heading__eyebrow">Live Connection</p>
+                  <h2 className="panel-heading__title">IDE status</h2>
+                </div>
+              </div>
+              {ideActivity?.lastEventAt ? (
+                <dl className="space-y-2 text-[13px]">
+                  <MetricRow label="Connected" value={ideActivity?.ideConnected ? "Yes" : "No"} />
+                  <MetricRow label="Last event" value={formatDate(ideActivity?.lastEventAt)} />
+                  <MetricRow label="Current file" value={ideActivity?.currentFile ?? "n/a"} />
+                  <MetricRow label="Last edited" value={ideActivity?.lastEditedFile ?? "n/a"} />
+                  <MetricRow label="Last added" value={ideActivity?.lastAddedFile ?? "n/a"} />
+                </dl>
+              ) : (
+                <PanelEmptyState label="IDE has not sent events yet" compact />
+              )}
+            </section>
+
+            <IdeEventDebugPanel events={visibleIdeEvents} />
+            <AnimatePresence>{error ? <ErrorBanner message={error} /> : null}</AnimatePresence>
+          </aside>
+        </div>
       </main>
     </div>
   );
@@ -207,36 +271,65 @@ export function App() {
 
 function PanelEmptyState({ label, compact = false }: { label: string; compact?: boolean }) {
   return (
-    <div className={`mt-2 flex flex-col items-center justify-center rounded-md border border-neutral-800 bg-neutral-950/60 px-4 text-center ${compact ? "py-4" : "min-h-64 py-6"}`}>
-      <svg width={compact ? 72 : 96} height={compact ? 42 : 56} viewBox="0 0 96 56" role="img" aria-label="Empty state">
-        <rect x="8" y="8" width="80" height="40" rx="6" fill="#111111" stroke="#2a2a2a" />
-        <line x1="18" y1="21" x2="78" y2="21" stroke="#333333" />
-        <line x1="18" y1="29" x2="64" y2="29" stroke="#2f2f2f" />
-        <line x1="18" y1="36" x2="58" y2="36" stroke="#2f2f2f" />
+    <div className={`empty-state ${compact ? "empty-state--compact" : ""}`}>
+      <svg width={compact ? 76 : 96} height={compact ? 44 : 56} viewBox="0 0 96 56" role="img" aria-label="Empty state">
+        <rect x="8" y="8" width="80" height="40" rx="10" fill="#0f172a" stroke="#334155" />
+        <line x1="18" y1="22" x2="78" y2="22" stroke="#475569" />
+        <line x1="18" y1="30" x2="64" y2="30" stroke="#334155" />
+        <line x1="18" y1="37" x2="58" y2="37" stroke="#334155" />
       </svg>
-      <p className="mt-3 text-xs text-neutral-400">{label}</p>
+      <p className="empty-state__subtitle">{label}</p>
     </div>
   );
 }
 
 function MetricRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-neutral-800 pb-2">
-      <dt className="text-neutral-400">{label}</dt>
-      <dd className="max-w-[65%] break-all text-right font-mono text-[12px] text-neutral-200">{value}</dd>
+    <div className="metric-row">
+      <dt className="metric-row__label">{label}</dt>
+      <dd className="metric-row__value">{value}</dd>
     </div>
   );
 }
 
 function ErrorBanner({ message }: { message: string }) {
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="rounded-md border border-red-800 bg-neutral-950 p-3 text-[13px] text-red-300">
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 6 }}
+      transition={{ duration: 0.18 }}
+      className="error-banner"
+    >
       {message}
     </motion.div>
+  );
+}
+
+function InfoChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="info-chip">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function HeroStat({ label, value, accent }: { label: string; value: string; accent: "success" | "danger" | "info" }) {
+  return (
+    <div className={`hero-stat hero-stat--${accent}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "n/a";
   return new Date(value).toLocaleString();
+}
+
+function formatLastSync(value: string | null): string {
+  if (!value) return "Pending";
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }

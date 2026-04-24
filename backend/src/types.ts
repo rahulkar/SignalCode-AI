@@ -4,6 +4,8 @@ export type TelemetryEventType =
   | "REJECTED"
   | "ITERATED";
 
+export type StatsRange = "15m" | "1h" | "24h" | "7d";
+
 export interface GenerateRequest {
   prompt: string;
   model?: string;
@@ -33,6 +35,9 @@ export interface TimeSeriesPoint {
   bucket: string;
   accepted: number;
   rejected: number;
+  iterated: number;
+  diffRendered: number;
+  acceptanceMomentum: number;
 }
 
 export interface RecentActivityRow {

@@ -1,4 +1,5 @@
 export type EventOutcome = "DIFF_RENDERED" | "ACCEPTED" | "REJECTED" | "ITERATED";
+export type StatsRange = "15m" | "1h" | "24h" | "7d";
 
 export interface StatsResponse {
   acceptanceRate: number;
@@ -14,6 +15,9 @@ export interface StatsResponse {
     bucket: string;
     accepted: number;
     rejected: number;
+    iterated: number;
+    diffRendered: number;
+    acceptanceMomentum: number;
   }>;
   recentActivity: Array<{
     timestamp: string;
@@ -59,8 +63,8 @@ export interface PostAcceptTaskReworkRow {
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
-export async function fetchStats(): Promise<StatsResponse> {
-  const response = await fetch(`${apiBaseUrl}/api/stats`);
+export async function fetchStats(range: StatsRange): Promise<StatsResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/stats?range=${encodeURIComponent(range)}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch stats: ${response.status}`);
   }

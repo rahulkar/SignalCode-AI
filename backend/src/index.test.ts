@@ -310,4 +310,52 @@ describe("backend integrity behaviors", () => {
     assert.equal(statsResponse.body.totals.accepted, 1);
     assert.equal(statsResponse.body.acceptanceRate, 100);
   });
+
+  it("returns range-aware time series with iterated counts and acceptance momentum", async () => {
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    const generateResponse = await request(app).post("/api/generate").send({
+      prompt: "iterate on a patch",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+
+    assert.equal(generateResponse.status, 200);
+    const taskId = generateResponse.body.task_id as string;
+    const diffId = generateResponse.body.diff_id as string;
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: `${diffId}-render`,
+      event: "DIFF_RENDERED",
+      timestamp: new Date().toISOString()
+    });
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: `${diffId}-iterated`,
+      event: "ITERATED",
+      timestamp: new Date().toISOString()
+    });
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: `${diffId}-accepted`,
+      event: "ACCEPTED",
+      timestamp: new Date().toISOString()
+    });
+
+    const statsResponse = await request(app).get("/api/stats").query({ range: "1h" });
+    assert.equal(statsResponse.status, 200);
+    assert.ok(Array.isArray(statsResponse.body.timeSeries));
+    const populatedBucket = statsResponse.body.timeSeries.find(
+      (point: { diffRendered: number; iterated: number; accepted: number; acceptanceMomentum: number }) =>
+        point.diffRendered === 1 && point.iterated === 1 && point.accepted === 1
+    );
+    assert.ok(populatedBucket);
+    assert.equal(populatedBucket.acceptanceMomentum, 100);
+  });
 });
