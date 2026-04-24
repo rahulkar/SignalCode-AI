@@ -21,7 +21,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
 
-class SignalCodeInlineAction : AnAction() {
+class SignalCodeInlineAction : AnAction("SignalCode AI", "Open SignalCode AI", SignalCodeIcons.Agent) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val backendClient = BackendClient("http://localhost:3001")
     private val requestVersionTracker = RequestVersionTracker()
@@ -35,18 +35,21 @@ class SignalCodeInlineAction : AnAction() {
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
         val psiFile = e.getData(CommonDataKeys.PSI_FILE) ?: return
         val context = buildContextSnapshot(project, editor, psiFile.virtualFile.path, psiFile.language.id)
+        val preferredModel = promptHistoryService.selectedModel(DEFAULT_MODEL)
         val dialog = SignalCodeAgentDialog(
-            project = project,
+            projectRef = project,
             context = context,
             promptHistoryService = promptHistoryService,
             fallbackModels = FALLBACK_MODELS,
-            defaultModel = promptHistoryService.selectedModel(DEFAULT_MODEL)
+            defaultModel = preferredModel
         )
 
         scope.launch {
-            val models = runCatching { withContext(Dispatchers.IO) { backendClient.fetchModels() } }.getOrNull() ?: return@launch
+            val modelsResult = runCatching { withContext(Dispatchers.IO) { backendClient.fetchModels() } }
             ApplicationManager.getApplication().invokeLater {
-                dialog.updateAvailableModels(models, promptHistoryService.selectedModel(DEFAULT_MODEL))
+                modelsResult
+                    .onSuccess { dialog.updateAvailableModels(it, preferredModel) }
+                    .onFailure { dialog.showFallbackCatalogStatus(formatError(it)) }
             }
         }
 
@@ -82,7 +85,7 @@ class SignalCodeInlineAction : AnAction() {
         }
 
         val previousJob = generateJob
-        val loadingDialog = SignalCodeLoadingDialog(project, "Generating plan and waiting for backend response…")
+        val loadingDialog = SignalCodeLoadingDialog(project, "Generating plan and waiting for backend response...")
         ApplicationManager.getApplication().invokeLater {
             loadingDialog.show()
         }

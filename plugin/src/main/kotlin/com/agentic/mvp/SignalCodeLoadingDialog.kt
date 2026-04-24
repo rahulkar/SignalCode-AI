@@ -22,7 +22,7 @@ class SignalCodeLoadingDialog(project: Project, message: String) {
         }
         dialog.contentPane = JPanel(BorderLayout(0, 10)).apply {
             border = EmptyBorder(16, 18, 16, 18)
-            add(JLabel("Working with SignalCode agent…", SwingConstants.CENTER), BorderLayout.NORTH)
+            add(JLabel("Working with SignalCode agent...", SignalCodeIcons.Agent, SwingConstants.CENTER), BorderLayout.NORTH)
             add(progress, BorderLayout.CENTER)
             add(statusLabel, BorderLayout.SOUTH)
             preferredSize = Dimension(360, 110)

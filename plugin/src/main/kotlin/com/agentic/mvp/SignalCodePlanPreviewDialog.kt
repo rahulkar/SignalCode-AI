@@ -3,6 +3,7 @@ package com.signalcode.mvp
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.Dimension
 import javax.swing.BorderFactory
@@ -11,6 +12,7 @@ import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JTextArea
+import javax.swing.SwingConstants
 
 class SignalCodePlanPreviewDialog(
     project: Project,
@@ -50,21 +52,31 @@ class SignalCodePlanPreviewDialog(
         return JPanel(BorderLayout(0, 10)).apply {
             preferredSize = Dimension(760, 560)
             add(
-                JPanel(BorderLayout(0, 4)).apply {
-                    add(JLabel(operation.summary), BorderLayout.NORTH)
+                JPanel(BorderLayout(0, 6)).apply {
+                    add(
+                        JLabel("Review agent plan", SignalCodeIcons.Agent, SwingConstants.LEFT).apply {
+                            font = font.deriveFont(font.size2D + 1.5f)
+                            iconTextGap = JBUI.scale(8)
+                        },
+                        BorderLayout.NORTH
+                    )
+                    add(JLabel(operation.summary, SignalCodeIcons.Patch, SwingConstants.LEFT), BorderLayout.CENTER)
                     add(
                         JPanel(BorderLayout(0, 4)).apply {
-                            add(JLabel("Target: ${operation.targetFilePath}"), BorderLayout.NORTH)
-                            add(JLabel(buildUsageSummary(usage)), BorderLayout.SOUTH)
+                            add(JLabel("Target: ${operation.targetFilePath}", SignalCodeIcons.Target, SwingConstants.LEFT), BorderLayout.NORTH)
+                            add(JLabel(buildUsageSummary(usage), SignalCodeIcons.ModeModel, SwingConstants.LEFT), BorderLayout.SOUTH)
                         },
                         BorderLayout.SOUTH
                     )
                 },
                 BorderLayout.NORTH
             )
-            add(JScrollPane(previewArea).apply {
-                border = BorderFactory.createLineBorder(com.intellij.util.ui.UIUtil.getBoundsColor())
-            }, BorderLayout.CENTER)
+            add(
+                JScrollPane(previewArea).apply {
+                    border = BorderFactory.createLineBorder(UIUtil.getBoundsColor())
+                },
+                BorderLayout.CENTER
+            )
         }
     }
 }
@@ -78,5 +90,5 @@ private fun buildUsageSummary(usage: UsageMetrics?): String {
     usage.completionTokens?.let { parts += "completion $it" }
     usage.totalTokens?.let { parts += "total $it" }
     usage.costUsd?.let { parts += "cost $${"%.5f".format(it)}" }
-    return if (parts.isEmpty()) "Usage: unavailable from model provider" else "Usage: ${parts.joinToString(" • ")}"
+    return if (parts.isEmpty()) "Usage: unavailable from model provider" else "Usage: ${parts.joinToString(" | ")}"
 }

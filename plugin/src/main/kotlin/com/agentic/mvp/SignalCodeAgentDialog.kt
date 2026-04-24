@@ -10,6 +10,7 @@ import java.awt.Dimension
 import java.awt.FlowLayout
 import javax.swing.BorderFactory
 import javax.swing.DefaultComboBoxModel
+import javax.swing.Icon
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -21,12 +22,12 @@ import javax.swing.JTextField
 import javax.swing.SwingConstants
 
 class SignalCodeAgentDialog(
-    project: Project,
+    private val projectRef: Project,
     private val context: EditorContextSnapshot,
     promptHistoryService: PromptHistoryService,
     fallbackModels: List<String>,
     defaultModel: String
-) : DialogWrapper(project) {
+) : DialogWrapper(projectRef) {
     private val promptField = JTextArea(8, 68).apply {
         lineWrap = true
         wrapStyleWord = true
@@ -53,16 +54,30 @@ class SignalCodeAgentDialog(
     }
     private val helperLabel = JLabel("", SwingConstants.LEFT)
     private val targetHintLabel = JLabel("Path is relative to the project root.")
-    private val statusLabel = JLabel("Fetching live models…")
+    private val statusLabel = JLabel("", null, SwingConstants.RIGHT).apply {
+        iconTextGap = JBUI.scale(6)
+        isVisible = false
+    }
     private val targetRow = JPanel(BorderLayout(8, 0))
-    private val submissionButtonLabel = JLabel()
-    private val useHistoryButton = JButton("Use")
+    private val submissionButtonLabel = JLabel("", SignalCodeIcons.Context, SwingConstants.LEFT)
+    private val useHistoryButton = JButton("Use").apply {
+        isEnabled = historyModel.size > 0
+    }
     private val clearHistoryButton = JButton("Clear history").apply {
         isEnabled = historyModel.size > 0
     }
-    private val presetRefactorButton = JButton("Refactor")
-    private val presetPlanButton = JButton("Add tests")
-    private val presetScaffoldButton = JButton("Scaffold file")
+    private val presetRefactorButton = JButton("Refactor").apply {
+        icon = SignalCodeIcons.Patch
+    }
+    private val presetPlanButton = JButton("Add tests").apply {
+        icon = SignalCodeIcons.Test
+    }
+    private val presetScaffoldButton = JButton("Scaffold file").apply {
+        icon = SignalCodeIcons.Target
+    }
+    private val demoModeButton = JButton("Open demo walkthrough").apply {
+        icon = SignalCodeIcons.Demo
+    }
 
     var submission: AgentDialogSubmission? = null
         private set
@@ -73,7 +88,6 @@ class SignalCodeAgentDialog(
         init()
         helperLabel.border = JBUI.Borders.emptyTop(2)
         helperLabel.text = (modeCombo.selectedItem as AgentMode).description
-        statusLabel.border = JBUI.Borders.emptyTop(2)
         bindActions(promptHistoryService)
         updateModeUi()
         initValidation()
@@ -81,22 +95,26 @@ class SignalCodeAgentDialog(
 
     override fun createCenterPanel(): JComponent {
         val shell = JPanel(BorderLayout(0, 12)).apply {
-            preferredSize = Dimension(760, 560)
+            preferredSize = Dimension(760, 620)
             border = JBUI.Borders.empty(10, 4)
         }
 
         val header = JPanel(BorderLayout(12, 0)).apply {
             add(
                 JPanel(BorderLayout(0, 4)).apply {
-                    add(JLabel("SignalCode Agent").apply {
-                        font = font.deriveFont(font.size2D + 2f)
-                    }, BorderLayout.NORTH)
+                    add(
+                        JLabel("SignalCode Agent", SignalCodeIcons.Agent, SwingConstants.LEFT).apply {
+                            font = font.deriveFont(font.size2D + 2f)
+                            iconTextGap = JBUI.scale(8)
+                        },
+                        BorderLayout.NORTH
+                    )
                     add(JLabel("Plan code changes before applying them."), BorderLayout.SOUTH)
                 },
                 BorderLayout.WEST
             )
             add(
-                JPanel(BorderLayout()).apply {
+                JPanel(BorderLayout(0, 4)).apply {
                     add(statusLabel, BorderLayout.NORTH)
                     add(submissionButtonLabel, BorderLayout.SOUTH)
                 },
@@ -106,22 +124,27 @@ class SignalCodeAgentDialog(
 
         val controls = JPanel().apply {
             layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
-            add(cardPanel("Mode & model", buildModeAndModelPanel()))
-            add(JPanel().apply { preferredSize = Dimension(0, 8); maximumSize = preferredSize })
-            add(cardPanel("Context", buildContextPanel()))
-            add(JPanel().apply { preferredSize = Dimension(0, 8); maximumSize = preferredSize })
-            add(cardPanel("Target", buildTargetPanel()))
-            add(JPanel().apply { preferredSize = Dimension(0, 8); maximumSize = preferredSize })
-            add(cardPanel("Prompt", buildPromptPanel()))
-            add(JPanel().apply { preferredSize = Dimension(0, 8); maximumSize = preferredSize })
-            add(cardPanel("History", buildHistoryPanel()))
+            add(cardPanel("Mode & model", SignalCodeIcons.ModeModel, buildModeAndModelPanel()))
+            add(spacer())
+            add(cardPanel("Context", SignalCodeIcons.Context, buildContextPanel()))
+            add(spacer())
+            add(cardPanel("Demo mode", SignalCodeIcons.Demo, buildDemoPanel()))
+            add(spacer())
+            add(cardPanel("Target", SignalCodeIcons.Target, buildTargetPanel()))
+            add(spacer())
+            add(cardPanel("Prompt", SignalCodeIcons.Prompt, buildPromptPanel()))
+            add(spacer())
+            add(cardPanel("History", SignalCodeIcons.History, buildHistoryPanel()))
         }
 
         shell.add(header, BorderLayout.NORTH)
-        shell.add(JScrollPane(controls).apply {
-            border = BorderFactory.createEmptyBorder()
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-        }, BorderLayout.CENTER)
+        shell.add(
+            JScrollPane(controls).apply {
+                border = BorderFactory.createEmptyBorder()
+                horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            },
+            BorderLayout.CENTER
+        )
         return shell
     }
 
@@ -166,15 +189,22 @@ class SignalCodeAgentDialog(
 
         modelCombo.removeAllItems()
         visibleModels.forEach { modelCombo.addItem(it) }
+
         val hasLiveAvailability = models.availableModels != null
         val noLiveModels = hasLiveAvailability && liveModels.isEmpty()
-        modelCombo.isEnabled = visibleModels.isNotEmpty() && !noLiveModels
-        isOKActionEnabled = !noLiveModels
+        val hasVisibleModels = visibleModels.isNotEmpty()
+        modelCombo.isEnabled = hasVisibleModels && !noLiveModels
+        modelCombo.toolTipText = when {
+            noLiveModels -> "The backend responded, but no live models are currently available."
+            hasVisibleModels -> null
+            else -> "No models are available."
+        }
+        isOKActionEnabled = modelCombo.isEnabled
 
-        statusLabel.text = when {
-            noLiveModels -> "No live models available"
-            hasLiveAvailability -> "Using live model availability"
-            else -> "Using configured model catalog"
+        when {
+            !hasVisibleModels -> setModelStatus("No models available.", SignalCodeIcons.ModeModel, "The backend did not return any supported models.")
+            noLiveModels -> setModelStatus("No live models available right now.", SignalCodeIcons.ModeModel, "The backend is reachable, but no supported live models are currently available.")
+            else -> clearModelStatus()
         }
 
         val selection = when {
@@ -186,6 +216,14 @@ class SignalCodeAgentDialog(
         if (selection != null) {
             modelCombo.selectedItem = selection
         }
+    }
+
+    fun showFallbackCatalogStatus(reason: String? = null) {
+        setModelStatus(
+            "Live models unavailable. Using bundled model catalog.",
+            SignalCodeIcons.ModeModel,
+            reason
+        )
     }
 
     private fun bindActions(promptHistoryService: PromptHistoryService) {
@@ -223,6 +261,9 @@ class SignalCodeAgentDialog(
                 targetPathField.text = suggestTargetPath()
             }
             promptField.text = "Create a new file that scaffolds the feature described by the surrounding code and project conventions."
+        }
+        demoModeButton.addActionListener {
+            SignalCodeDemoDialog(projectRef).show()
         }
     }
 
@@ -268,9 +309,29 @@ class SignalCodeAgentDialog(
         }
         return JPanel(BorderLayout(0, 8)).apply {
             add(JLabel("${context.contextLabel} in ${context.fileName}"), BorderLayout.NORTH)
-            add(JScrollPane(snippetArea).apply {
-                border = BorderFactory.createLineBorder(UIUtil.getBoundsColor())
-            }, BorderLayout.CENTER)
+            add(
+                JScrollPane(snippetArea).apply {
+                    border = BorderFactory.createLineBorder(UIUtil.getBoundsColor())
+                },
+                BorderLayout.CENTER
+            )
+        }
+    }
+
+    private fun buildDemoPanel(): JPanel {
+        return JPanel(BorderLayout(0, 10)).apply {
+            add(
+                bodyText(
+                    "Use a realistic Java calculator walkthrough for executive demos. This path previews the agent flow without changing project files."
+                ),
+                BorderLayout.NORTH
+            )
+            add(
+                JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                    add(demoModeButton)
+                },
+                BorderLayout.CENTER
+            )
         }
     }
 
@@ -292,10 +353,13 @@ class SignalCodeAgentDialog(
         }
         return JPanel(BorderLayout(0, 8)).apply {
             add(presetRow, BorderLayout.NORTH)
-            add(JScrollPane(promptField).apply {
-                preferredSize = Dimension(680, 170)
-                border = BorderFactory.createLineBorder(UIUtil.getBoundsColor())
-            }, BorderLayout.CENTER)
+            add(
+                JScrollPane(promptField).apply {
+                    preferredSize = Dimension(680, 170)
+                    border = BorderFactory.createLineBorder(UIUtil.getBoundsColor())
+                },
+                BorderLayout.CENTER
+            )
         }
     }
 
@@ -312,15 +376,52 @@ class SignalCodeAgentDialog(
         }
     }
 
-    private fun cardPanel(title: String, content: JComponent): JPanel {
+    private fun cardPanel(title: String, icon: Icon, content: JComponent): JPanel {
         return JPanel(BorderLayout(0, 8)).apply {
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(UIUtil.getBoundsColor()),
                 JBUI.Borders.empty(12)
             )
-            add(JLabel(title).apply { font = font.deriveFont(font.size2D + 0.5f) }, BorderLayout.NORTH)
+            add(
+                JLabel(title, icon, SwingConstants.LEFT).apply {
+                    font = font.deriveFont(font.size2D + 0.5f)
+                    iconTextGap = JBUI.scale(8)
+                },
+                BorderLayout.NORTH
+            )
             add(content, BorderLayout.CENTER)
         }
+    }
+
+    private fun bodyText(text: String): JTextArea {
+        return JTextArea(text).apply {
+            isEditable = false
+            isOpaque = false
+            lineWrap = true
+            wrapStyleWord = true
+            border = BorderFactory.createEmptyBorder()
+        }
+    }
+
+    private fun spacer(): JPanel {
+        return JPanel().apply {
+            preferredSize = Dimension(0, 8)
+            maximumSize = preferredSize
+        }
+    }
+
+    private fun setModelStatus(text: String, icon: Icon, tooltip: String? = null) {
+        statusLabel.text = text
+        statusLabel.icon = icon
+        statusLabel.toolTipText = tooltip
+        statusLabel.isVisible = true
+    }
+
+    private fun clearModelStatus() {
+        statusLabel.text = ""
+        statusLabel.icon = null
+        statusLabel.toolTipText = null
+        statusLabel.isVisible = false
     }
 
     private fun suggestTargetPath(): String = when (context.languageId?.lowercase()) {

@@ -14,7 +14,8 @@
         <action id="SignalCodeInlineAction"
                 class="com.signalcode.mvp.SignalCodeInlineAction"
                 text="SignalCode AI"
-                description="Open SignalCode AI">
+                description="Open SignalCode AI"
+                icon="/META-INF/pluginIcon.svg">
             <keyboard-shortcut keymap="$default" first-keystroke="alt BACK_SLASH"/>
             <keyboard-shortcut keymap="$default" first-keystroke="control alt K"/>
         </action>

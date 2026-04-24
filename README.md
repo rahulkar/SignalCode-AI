@@ -1,6 +1,13 @@
 # SignalCode AI
 
-Cursor-style inline AI editing inside IntelliJ, backed by LiteLLM and a React telemetry dashboard.
+Cursor-style inline AI editing inside IntelliJ, backed by LiteLLM, an Express API, and a React telemetry dashboard.
+
+## Latest IntelliJ Plugin Updates
+
+- Cleaner model loading UX: the SignalCode Agent dialog now avoids stale "Fetching live models..." copy and only shows model status when there is something actionable, such as falling back to the bundled catalog or having no live models available.
+- Icon-backed IntelliJ experience: the plugin action, main agent dialog, loading dialog, and review modal now use a dedicated SignalCode icon pack for a more polished IDE presentation.
+- Executive demo mode: the IntelliJ plugin now includes a read-only demo walkthrough built around a realistic Java calculator app. It explains what the agent would inspect, change, test, and send to the dashboard without creating real project noise.
+- Mock review flow for demos: demo mode can open the existing plan-review modal with a believable calculator patch so executives can see the end-to-end MVP flow without calling the live generate path.
 
 ## Repo Layout
 
@@ -63,16 +70,31 @@ gradle build --console=plain
 gradle runIde
 ```
 
-In sandbox IDE: open file -> select text or place caret -> press `Alt+\` (or `Ctrl+Alt+K`) -> prompt -> Generate -> Accept/Reject.
+In sandbox IDE:
+
+- Open a file, select code or place the caret, then press `Alt+\` (or `Ctrl+Alt+K`).
+- Use the SignalCode Agent dialog to choose operation, model, prompt, and target path when needed.
+- Use `Open demo walkthrough` for executive demos, or generate a real plan and review it with Apply/Reject.
+
+The plugin targets IntelliJ Platform build `241+` (IntelliJ IDEA 2024.1 and newer).
+
+## IntelliJ Plugin Highlights
+
+- SignalCode Agent dialog for update, insert, and create-file workflows.
+- Live model discovery from `GET /api/models` with graceful fallback to the bundled model catalog when live availability cannot be fetched.
+- Prompt quick starts, recent prompt history, and active-file context preview.
+- Executive demo mode with a realistic Java calculator scenario and mock patch review.
+- Inline review flow plus telemetry events for `DIFF_RENDERED`, `ACCEPTED`, `REJECTED`, and `ITERATED`.
 
 ## How It Works
 
-1. Plugin opens inline prompt popup.
-2. Plugin fetches models (`GET /api/models`) and sends `POST /api/generate`.
-3. Backend calls LiteLLM and expects strict `SEARCH/REPLACE` output.
-4. Plugin renders diff and applies on Accept.
-5. Plugin posts telemetry (`DIFF_RENDERED`, `ACCEPTED`, `REJECTED`, `ITERATED`).
-6. Dashboard visualizes stats, IDE activity, and post-accept rework.
+1. Plugin opens the SignalCode Agent dialog with code context, prompt history, and quick-start actions.
+2. Plugin tries to fetch live model availability from `GET /api/models` and falls back to the bundled catalog if live availability is unreachable.
+3. For real runs, the plugin sends `POST /api/generate` with the selected mode, model, and editor context.
+4. Backend calls LiteLLM and expects strict `SEARCH/REPLACE` style output for patch generation.
+5. Plugin renders the review plan, applies the change on Accept, and records telemetry (`DIFF_RENDERED`, `ACCEPTED`, `REJECTED`, `ITERATED`).
+6. Dashboard visualizes task stats, IDE activity, and post-accept rework.
+7. For executive demos, demo mode opens a realistic read-only walkthrough and mock review flow without changing project files.
 
 ## Core APIs
 
@@ -115,12 +137,19 @@ cd plugin && gradle build --console=plain
   - `cd plugin`
   - `gradle --stop`
   - rebuild
+- Model picker falls back to bundled catalog:
+  - verify backend on `http://localhost:3001`
+  - verify `GET /api/models` returns 200
+  - verify LiteLLM and backend are both running before opening the IntelliJ dialog
 - Dashboard empty:
   - verify backend on `http://localhost:3001`
   - verify `/api/stats` returns 200
 - Generation fails:
   - verify `GEMINI_API_KEY`
   - verify LiteLLM reachable at `http://localhost:4000`
+- Demo mode expectations:
+  - demo walkthrough is intentionally read-only
+  - mock review is for presentation only and does not call the live generate path
 
 ## Security Notes
 
