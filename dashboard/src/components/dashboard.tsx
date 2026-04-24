@@ -95,6 +95,11 @@ export function ChartPanel({
   const hasTimeSeries = timeSeries.some(
     (point) => point.accepted > 0 || point.rejected > 0 || point.iterated > 0 || point.diffRendered > 0
   );
+  const hasOutcomeFlow = timeSeries.some((point) => point.accepted > 0 || point.rejected > 0 || point.iterated > 0);
+  const flowChartData = useMemo(
+    () => timeSeries.filter((point) => point.accepted > 0 || point.rejected > 0 || point.iterated > 0),
+    [timeSeries]
+  );
   const totals = useMemo(
     () =>
       timeSeries.reduce(
@@ -132,10 +137,10 @@ export function ChartPanel({
             subtitle="Accepted, iterated, and rejected outputs across the active analysis window."
             badge={timeRange.toUpperCase()}
           />
-          {hasTimeSeries ? (
+          {hasOutcomeFlow ? (
             <div className="h-72 sm:h-80">
               <ResponsiveContainer>
-                <BarChart data={timeSeries} barGap={6}>
+                <BarChart data={flowChartData} barGap={10} barCategoryGap="22%">
                   <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                   <XAxis
                     dataKey="bucket"
@@ -150,12 +155,18 @@ export function ChartPanel({
                     labelFormatter={(value) => new Date(value).toLocaleString()}
                     formatter={(value: number, name: string) => [value, toTitleCase(name)]}
                   />
-                  <Bar dataKey="accepted" fill="#1fb86a" radius={[8, 8, 0, 0]} />
-                  <Bar dataKey="iterated" fill="#4f7cff" radius={[8, 8, 0, 0]} />
-                  <Bar dataKey="rejected" fill="#f46d5e" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="accepted" name="Accepted" fill="#1fb86a" radius={[8, 8, 0, 0]} minPointSize={8} />
+                  <Bar dataKey="iterated" name="Iterated" fill="#4f7cff" radius={[8, 8, 0, 0]} minPointSize={8} />
+                  <Bar dataKey="rejected" name="Rejected" fill="#f46d5e" radius={[8, 8, 0, 0]} minPointSize={8} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          ) : hasTimeSeries ? (
+            <CardEmptyState
+              title="No accepted, rejected, or iterated events"
+              subtitle="The current window has rendered activity, but no terminal outcomes have been recorded yet."
+              icon="chart"
+            />
           ) : (
             <CardEmptyState
               title="No outcome trend data"
@@ -273,6 +284,8 @@ export function ControlPanel(props: {
   outcomeFilter: "ALL" | "ACCEPTED" | "REJECTED" | "ITERATED" | "DIFF_RENDERED";
   onOutcomeFilterChange: (value: "ALL" | "ACCEPTED" | "REJECTED" | "ITERATED" | "DIFF_RENDERED") => void;
   onRefresh: () => void;
+  onExportChangeSnapshots: () => void;
+  isExporting: boolean;
   onResetDatabase: () => void;
 }) {
   return (
@@ -333,6 +346,12 @@ export function ControlPanel(props: {
         <button className="btn-primary" onClick={props.onRefresh} type="button">
           Refresh dashboard
         </button>
+        <button className="btn-secondary" onClick={props.onExportChangeSnapshots} type="button" disabled={props.isExporting}>
+          {props.isExporting ? "Exporting..." : "Export PR-style JSON"}
+        </button>
+        <p className="text-[11px] text-slate-400">
+          Downloads a best-effort snapshot export derived from SignalCode task telemetry for downstream analytics pipelines.
+        </p>
       </div>
 
       <section className="danger-card">

@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
   fetchHealth,
+  fetchExportChangeSnapshots,
   fetchIdeActivity,
   fetchIdeEvents,
   fetchPostAcceptTaskRework,
@@ -39,6 +40,7 @@ export function App() {
   const [query, setQuery] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState<"ALL" | "ACCEPTED" | "REJECTED" | "ITERATED" | "DIFF_RENDERED">("ALL");
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const load = async (range: StatsRange) => {
     const [statsRes, healthRes, ideRes, ideEventsRes, postAcceptRes] = await Promise.allSettled([
@@ -111,8 +113,16 @@ export function App() {
     ],
     [stats]
   );
-  const pieData = outcomeData.filter((item) => item.value > 0);
-  const totalOutcomeCount = outcomeData.reduce((sum, item) => sum + item.value, 0);
+  const windowOutcomeData = useMemo(
+    () => [
+      { name: "Accepted", value: (stats?.timeSeries ?? []).reduce((sum, point) => sum + point.accepted, 0), color: "#1fb86a" },
+      { name: "Rejected", value: (stats?.timeSeries ?? []).reduce((sum, point) => sum + point.rejected, 0), color: "#f46d5e" },
+      { name: "Iterated", value: (stats?.timeSeries ?? []).reduce((sum, point) => sum + point.iterated, 0), color: "#4f7cff" }
+    ],
+    [stats?.timeSeries]
+  );
+  const pieData = windowOutcomeData.filter((item) => item.value > 0);
+  const totalOutcomeCount = windowOutcomeData.reduce((sum, item) => sum + item.value, 0);
 
   const onResetDatabase = async () => {
     const ok = window.confirm("Clear all telemetry events and tasks?");
@@ -122,6 +132,27 @@ export function App() {
       await load(timeRange);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to clear database");
+    }
+  };
+
+  const onExportChangeSnapshots = async () => {
+    try {
+      setIsExporting(true);
+      const payload = await fetchExportChangeSnapshots();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `signalcode-pr-snapshots-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(objectUrl);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export change snapshots");
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -147,17 +178,17 @@ export function App() {
 
       <main className="app-main">
         <section className="hero-banner">
-          <div>
+          <div className="hero-banner__content">
             <p className="hero-banner__eyebrow">Operations Overview</p>
             <h2 className="hero-banner__title">A cleaner control room for prompt delivery analytics</h2>
             <p className="hero-banner__copy">
               Platform KPIs stay visible at a glance while the trend panels and activity feed follow the selected analysis window.
             </p>
-          </div>
-          <div className="hero-banner__meta">
-            <HeroStat label="Accepted" value={String(stats?.totals.accepted ?? 0)} accent="success" />
-            <HeroStat label="Rejected" value={String(stats?.totals.rejected ?? 0)} accent="danger" />
-            <HeroStat label="Iterated" value={String(stats?.totals.iterated ?? 0)} accent="info" />
+            <div className="hero-banner__meta">
+              <HeroStat label="Accepted" value={String(windowOutcomeData[0]?.value ?? 0)} accent="success" />
+              <HeroStat label="Rejected" value={String(windowOutcomeData[1]?.value ?? 0)} accent="danger" />
+              <HeroStat label="Iterated" value={String(windowOutcomeData[2]?.value ?? 0)} accent="info" />
+            </div>
           </div>
         </section>
 
@@ -171,7 +202,7 @@ export function App() {
                 <div>
                   <p className="panel-heading__eyebrow">Distribution</p>
                   <h2 className="panel-heading__title">Overall outcome mix</h2>
-                  <p className="panel-heading__subtitle">Zero-value segments are suppressed from the pie so active outcomes stay readable.</p>
+                  <p className="panel-heading__subtitle">Window totals only, with zero-value segments suppressed for readability.</p>
                 </div>
               </div>
               {pieData.length > 0 ? (
@@ -201,7 +232,7 @@ export function App() {
                     </ResponsiveContainer>
                   </div>
                   <div className="distribution-legend">
-                    {outcomeData.map((item) => (
+                    {windowOutcomeData.map((item) => (
                       <div key={item.name} className="distribution-legend__row">
                         <div className="distribution-legend__label">
                           <span className="distribution-legend__dot" style={{ backgroundColor: item.color }} aria-hidden />
@@ -237,6 +268,8 @@ export function App() {
               outcomeFilter={outcomeFilter}
               onOutcomeFilterChange={setOutcomeFilter}
               onRefresh={() => void load(timeRange)}
+              onExportChangeSnapshots={() => void onExportChangeSnapshots()}
+              isExporting={isExporting}
               onResetDatabase={() => void onResetDatabase()}
             />
 

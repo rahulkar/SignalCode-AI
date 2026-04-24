@@ -358,4 +358,116 @@ describe("backend integrity behaviors", () => {
     assert.ok(populatedBucket);
     assert.equal(populatedBucket.acceptanceMomentum, 100);
   });
+
+  it("exports PR-style change snapshot rows", async () => {
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    const generateResponse = await request(app).post("/api/generate").send({
+      prompt: "bump a",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+
+    assert.equal(generateResponse.status, 200);
+    const taskId = generateResponse.body.task_id as string;
+    const diffId = generateResponse.body.diff_id as string;
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: diffId,
+      event: "DIFF_RENDERED",
+      timestamp: "2026-04-24T10:00:00.000Z",
+      meta: { filePath: "/tmp/file.ts", acceptedLines: 24 }
+    });
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: `${diffId}-iterated`,
+      event: "ITERATED",
+      timestamp: "2026-04-24T10:00:03.000Z",
+      meta: { filePath: "/tmp/file.ts" }
+    });
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: `${diffId}-accepted`,
+      event: "ACCEPTED",
+      timestamp: "2026-04-24T10:00:05.000Z",
+      meta: { filePath: "/tmp/file.ts" }
+    });
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "post-accept-edit-1",
+      event: "DIFF_RENDERED",
+      timestamp: "2026-04-24T10:00:10.000Z",
+      meta: {
+        source: "post-accept",
+        filePath: "/tmp/file.ts",
+        acceptedLines: 24,
+        currentLines: 21,
+        lineDelta: 3
+      }
+    });
+
+    const exportResponse = await request(app).get("/api/export/pr-snapshots");
+    assert.equal(exportResponse.status, 200);
+    assert.equal(exportResponse.body.totalRecords, 1);
+    assert.ok(Array.isArray(exportResponse.body.records));
+    assert.equal(exportResponse.body.records[0].pr_id, taskId);
+    assert.equal(exportResponse.body.records[0].service, "tmp");
+    assert.equal(exportResponse.body.records[0].submitted_at, "2026-04-24T10:00:00.000Z");
+    assert.equal(exportResponse.body.records[0].merged_at, "2026-04-24T10:00:05.000Z");
+    assert.equal(exportResponse.body.records[0].total_lines_added_at_submission, 24);
+    assert.equal(exportResponse.body.records[0].total_lines_added_at_merge, 21);
+    assert.equal(exportResponse.body.records[0].ai_flagged_lines_at_merge, 21);
+    assert.equal(exportResponse.body.records[0].ai_submission_pct, 100);
+    assert.equal(exportResponse.body.records[0].ai_acceptance_pct, 87.5);
+    assert.equal(exportResponse.body.records[0].review_cycle_count, 1);
+    assert.deepEqual(exportResponse.body.records[0].files_changed, ["/tmp/file.ts"]);
+    assert.equal(exportResponse.body.records[0].terminal_outcome, "ACCEPTED");
+    assert.equal(exportResponse.body.records[0].data_quality, "observed");
+  });
+
+  it("excludes succeeded tasks that never emitted change telemetry from export", async () => {
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    const generateOnly = await request(app).post("/api/generate").send({
+      prompt: "draft something",
+      context: {
+        filePath: "/tmp/only-generated.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+
+    const generateWithTelemetry = await request(app).post("/api/generate").send({
+      prompt: "render something",
+      context: {
+        filePath: "/tmp/with-event.ts",
+        selectionOrCaretSnippet: "const b = 1;",
+        languageId: "typescript"
+      }
+    });
+
+    assert.equal(generateOnly.status, 200);
+    assert.equal(generateWithTelemetry.status, 200);
+
+    await request(app).post("/api/telemetry").send({
+      task_id: generateWithTelemetry.body.task_id,
+      diff_id: generateWithTelemetry.body.diff_id,
+      event: "DIFF_RENDERED",
+      timestamp: "2026-04-24T10:05:00.000Z",
+      meta: { filePath: "/tmp/with-event.ts", acceptedLines: 12 }
+    });
+
+    const exportResponse = await request(app).get("/api/export/pr-snapshots");
+    assert.equal(exportResponse.status, 200);
+    assert.equal(exportResponse.body.totalRecords, 1);
+    assert.equal(exportResponse.body.records[0].pr_id, generateWithTelemetry.body.task_id);
+  });
 });

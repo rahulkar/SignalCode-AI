@@ -129,7 +129,7 @@
   }
 
   .hero-banner {
-    @apply mb-4 grid gap-4 rounded-[28px] border px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_380px];
+    @apply mb-4 rounded-[28px] border px-5 py-5 sm:px-6;
     border-color: rgba(129, 140, 248, 0.16);
     background:
       linear-gradient(135deg, rgba(79, 124, 255, 0.16), transparent 48%),
@@ -137,12 +137,16 @@
     box-shadow: var(--shadow-strong);
   }
 
+  .hero-banner__content {
+    @apply flex flex-col gap-4;
+  }
+
   .hero-banner__title {
     @apply mt-2 text-[24px] font-semibold tracking-tight;
   }
 
   .hero-banner__meta {
-    @apply grid gap-3 sm:grid-cols-3 lg:grid-cols-1;
+    @apply grid gap-3 sm:grid-cols-3;
   }
 
   .hero-stat {
@@ -290,6 +294,7 @@
   }
 
   .btn-primary,
+  .btn-secondary,
   .btn-danger {
     @apply inline-flex min-h-10 items-center justify-center rounded-xl px-4 text-[13px] font-semibold transition;
   }
@@ -304,6 +309,16 @@
     background: linear-gradient(135deg, #6a90ff, #4671f0);
   }
 
+  .btn-secondary {
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(255, 255, 255, 0.035);
+    color: var(--text-primary);
+  }
+
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
   .btn-danger {
     border: 1px solid rgba(244, 109, 94, 0.28);
     background: rgba(244, 109, 94, 0.08);
@@ -312,6 +327,13 @@
 
   .btn-danger:hover {
     background: rgba(244, 109, 94, 0.12);
+  }
+
+  .btn-primary:disabled,
+  .btn-secondary:disabled,
+  .btn-danger:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
   }
 
   .danger-card {
@@ -335,8 +357,9 @@
   }
 
   .status-chip__dot {
-    @apply h-2 w-2 rounded-full;
-    background: currentColor;
+    @apply h-2.5 w-2.5 shrink-0 rounded-full;
+    background: rgba(226, 232, 240, 0.9);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
   }
 
   .status-chip--success {
@@ -345,10 +368,20 @@
     color: #8ef0ba;
   }
 
+  .status-chip--success .status-chip__dot {
+    background: #1fb86a;
+    box-shadow: 0 0 0 4px rgba(31, 184, 106, 0.14);
+  }
+
   .status-chip--danger {
     border-color: rgba(244, 109, 94, 0.22);
     background: rgba(244, 109, 94, 0.08);
     color: #ffb4aa;
+  }
+
+  .status-chip--danger .status-chip__dot {
+    background: #f46d5e;
+    box-shadow: 0 0 0 4px rgba(244, 109, 94, 0.14);
   }
 
   .table-shell {

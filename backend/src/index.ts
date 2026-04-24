@@ -8,6 +8,8 @@ import { fetchAvailableModelIds, generateSearchReplace } from "./litellm.js";
 import { defaultModel as generatedDefaultModel, supportedModels } from "./modelCatalog.generated.js";
 import { generateRequestSchema, telemetryRequestSchema } from "./schemas.js";
 import type {
+  ExportChangeSnapshotRow,
+  ExportChangeSnapshotsResponse,
   GenerateResponse,
   IdeActivityResponse,
   IdeMonitorEvent,
@@ -31,6 +33,14 @@ type ListModelsFn = typeof fetchAvailableModelIds;
 type SupportedModel = (typeof supportedModels)[number];
 type RangeConfig = { windowMs: number; bucketMs: number };
 type TimeSeriesRow = { created_at: string; type: "DIFF_RENDERED" | "ACCEPTED" | "REJECTED" | "ITERATED" };
+type ExportTaskRow = { task_id: string; prompt_snippet: string; model: string; created_at: string };
+type ExportEventRow = {
+  task_id: string;
+  diff_id: string;
+  type: "DIFF_RENDERED" | "ACCEPTED" | "REJECTED" | "ITERATED";
+  metadata: string | null;
+  created_at: string;
+};
 
 const STATS_RANGE_CONFIG: Record<StatsRange, RangeConfig> = {
   "15m": { windowMs: 15 * 60 * 1000, bucketMs: 60 * 1000 },
@@ -193,6 +203,50 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
     console.error("[/api/telemetry]", message);
     return res.status(500).json({ error: "Failed to store telemetry", message });
   }
+  });
+
+  app.get("/api/export/pr-snapshots", (_req, res) => {
+    const taskRows = db
+      .prepare(
+        `SELECT DISTINCT t.task_id, t.prompt_snippet, t.model, t.created_at
+         FROM tasks t
+         INNER JOIN events e ON e.task_id = t.task_id
+         WHERE t.status = 'SUCCEEDED'
+           AND t.model != 'ide-monitor'
+         ORDER BY t.created_at DESC`
+      )
+      .all() as ExportTaskRow[];
+
+    const eventRows = db
+      .prepare(
+        `SELECT e.task_id, e.diff_id, e.type, e.metadata, e.created_at
+         FROM events e
+         INNER JOIN tasks t ON t.task_id = e.task_id
+         WHERE t.status = 'SUCCEEDED'
+           AND t.model != 'ide-monitor'
+         ORDER BY e.created_at ASC`
+      )
+      .all() as ExportEventRow[];
+
+    const eventsByTask = new Map<string, ExportEventRow[]>();
+    for (const event of eventRows) {
+      const current = eventsByTask.get(event.task_id);
+      if (current) {
+        current.push(event);
+      } else {
+        eventsByTask.set(event.task_id, [event]);
+      }
+    }
+
+    const records: ExportChangeSnapshotRow[] = taskRows.map((task) => buildExportSnapshot(task, eventsByTask.get(task.task_id) ?? []));
+
+    const response: ExportChangeSnapshotsResponse = {
+      exportedAt: new Date().toISOString(),
+      totalRecords: records.length,
+      records
+    };
+
+    res.json(response);
   });
 
   app.get("/api/stats", (req, res) => {
@@ -564,6 +618,131 @@ function parseMeta(metadata: string | null): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function buildExportSnapshot(task: ExportTaskRow, events: ExportEventRow[]): ExportChangeSnapshotRow {
+  const enrichedEvents = events.map((event) => ({ ...event, meta: parseMeta(event.metadata) }));
+  const lifecycleEvents = enrichedEvents.filter((event) => getMetaString(event.meta, "source") !== "post-accept");
+  const postAcceptEvents = enrichedEvents.filter((event) => getMetaString(event.meta, "source") === "post-accept");
+
+  const firstRendered = lifecycleEvents.find((event) => event.type === "DIFF_RENDERED");
+  const firstAccepted = lifecycleEvents.find((event) => event.type === "ACCEPTED");
+  const lastRejected = [...lifecycleEvents].reverse().find((event) => event.type === "REJECTED");
+  const latestPostAccept = postAcceptEvents.at(-1);
+
+  const filePaths = [...new Set(enrichedEvents.map((event) => getMetaString(event.meta, "filePath")).filter((value): value is string => Boolean(value)))];
+  const submittedAt = firstRendered?.created_at ?? task.created_at;
+  const mergedAt = firstAccepted?.created_at ?? null;
+  const terminalOutcome: ExportChangeSnapshotRow["terminal_outcome"] = firstAccepted
+    ? "ACCEPTED"
+    : lastRejected
+      ? "REJECTED"
+      : "OPEN";
+
+  const submissionLines =
+    readMetaNumber(firstRendered?.meta, "acceptedLines") ??
+    readMetaNumber(firstAccepted?.meta, "acceptedLines") ??
+    readMetaNumber(latestPostAccept?.meta, "acceptedLines");
+  const mergeLines =
+    readMetaNumber(latestPostAccept?.meta, "currentLines") ??
+    readMetaNumber(firstAccepted?.meta, "acceptedLines") ??
+    submissionLines;
+  const submissionAiLines = submissionLines;
+  const mergeAiLines = deriveAcceptedAiLines(terminalOutcome, submissionAiLines, latestPostAccept?.meta);
+
+  const aiSubmissionPct =
+    submissionLines !== null && submissionAiLines !== null && submissionLines > 0
+      ? Number(((submissionAiLines / submissionLines) * 100).toFixed(1))
+      : null;
+  const aiAcceptancePct =
+    submissionAiLines !== null && mergeAiLines !== null && submissionAiLines > 0
+      ? Number(((mergeAiLines / submissionAiLines) * 100).toFixed(1))
+      : null;
+
+  return {
+    pr_id: task.task_id,
+    service: deriveServiceName(filePaths),
+    team: null,
+    author_id: null,
+    submitted_at: submittedAt,
+    merged_at: mergedAt,
+    total_lines_added_at_submission: submissionLines,
+    total_lines_added_at_merge: terminalOutcome === "REJECTED" ? 0 : mergeLines,
+    ai_flagged_lines_at_submission: submissionAiLines,
+    ai_flagged_lines_at_merge: mergeAiLines,
+    ai_submission_pct: aiSubmissionPct,
+    ai_acceptance_pct: aiAcceptancePct,
+    files_changed: filePaths,
+    ai_tool_hint: task.model,
+    review_cycle_count: lifecycleEvents.filter((event) => event.type === "ITERATED").length,
+    comments_on_ai_lines: null,
+    terminal_outcome: terminalOutcome,
+    signal_source: "signalcode_telemetry",
+    data_quality: determineExportQuality({
+      hasSubmissionMetrics: submissionLines !== null,
+      hasFilePaths: filePaths.length > 0,
+      hasLifecycleEvents: lifecycleEvents.length > 0
+    })
+  };
+}
+
+function determineExportQuality(input: {
+  hasSubmissionMetrics: boolean;
+  hasFilePaths: boolean;
+  hasLifecycleEvents: boolean;
+}): ExportChangeSnapshotRow["data_quality"] {
+  if (input.hasSubmissionMetrics) {
+    return "observed";
+  }
+  if (input.hasFilePaths || input.hasLifecycleEvents) {
+    return "partial";
+  }
+  return "derived";
+}
+
+function deriveAcceptedAiLines(
+  terminalOutcome: ExportChangeSnapshotRow["terminal_outcome"],
+  submissionAiLines: number | null,
+  postAcceptMeta: Record<string, unknown> | undefined
+): number | null {
+  if (terminalOutcome === "REJECTED") {
+    return 0;
+  }
+  if (terminalOutcome !== "ACCEPTED" || submissionAiLines === null) {
+    return null;
+  }
+
+  const lineDelta = readMetaNumber(postAcceptMeta, "lineDelta");
+  if (lineDelta === null) {
+    return submissionAiLines;
+  }
+
+  return Math.max(submissionAiLines - lineDelta, 0);
+}
+
+function readMetaNumber(meta: Record<string, unknown> | undefined, key: string): number | null {
+  if (!meta) return null;
+  const value = meta[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function deriveServiceName(filePaths: string[]): string | null {
+  const firstPath = filePaths[0];
+  if (!firstPath) return null;
+
+  const segments = firstPath
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((segment) => segment.length > 0);
+
+  const anchorNames = new Set(["src", "app", "lib", "packages", "services"]);
+  for (let index = 1; index < segments.length; index += 1) {
+    if (anchorNames.has(segments[index].toLowerCase())) {
+      return segments[index - 1] ?? null;
+    }
+  }
+
+  return segments.length >= 2 ? segments[segments.length - 2] : null;
 }
 
 function parseStatsRange(value: unknown): StatsRange {

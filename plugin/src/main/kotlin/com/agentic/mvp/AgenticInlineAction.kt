@@ -335,6 +335,7 @@ class SignalCodeInlineAction : AnAction() {
                         mapOf("filePath" to filePath, "languageId" to (languageId ?: "unknown"))
                     )
                     showAcceptRejectPopup(project, editor, activeDiff!!)
+                    val renderedMetrics = buildRenderedDocumentMetrics(editor.document.text, parsed.search, parsed.replace)
                     scope.launch(Dispatchers.IO) {
                         runCatching {
                             backendClient.telemetry(
@@ -347,6 +348,7 @@ class SignalCodeInlineAction : AnAction() {
                                         "languageId" to (languageId ?: "unknown"),
                                         "fileAction" to "opened"
                                     )
+                                        .plus(renderedMetrics?.toMeta().orEmpty())
                                 )
                             )
                         }
@@ -386,6 +388,7 @@ class SignalCodeInlineAction : AnAction() {
             val applied = diff.session.accept(project, diff.search, diff.replace)
             if (applied) {
                 val filePath = diff.meta["filePath"] as? String
+                val acceptedMetrics = DocumentMetrics.fromText(editor.document.text)
                 if (!filePath.isNullOrBlank()) {
                     PostAcceptTracker.registerAccepted(
                         taskId = diff.taskId,
@@ -401,7 +404,7 @@ class SignalCodeInlineAction : AnAction() {
                                 diff.taskId,
                                 diff.diffId,
                                 TelemetryEventType.ACCEPTED,
-                                diff.meta + mapOf("fileAction" to "edited")
+                                diff.meta + mapOf("fileAction" to "edited") + acceptedMetrics.toMeta()
                             )
                         )
                     }
@@ -480,6 +483,39 @@ class SignalCodeInlineAction : AnAction() {
             "gemini-3.1-pro-preview"
         )
     }
+}
+
+private data class DocumentMetrics(
+    val acceptedChars: Int,
+    val acceptedLines: Int
+) {
+    fun toMeta(): Map<String, Any> = mapOf(
+        "acceptedChars" to acceptedChars,
+        "acceptedLines" to acceptedLines
+    )
+
+    companion object {
+        fun fromText(text: String): DocumentMetrics = DocumentMetrics(
+            acceptedChars = text.length,
+            acceptedLines = lineCount(text)
+        )
+
+        private fun lineCount(text: String): Int {
+            if (text.isEmpty()) return 0
+            return text.count { it == '\n' } + 1
+        }
+    }
+}
+
+private fun buildRenderedDocumentMetrics(documentText: String, search: String, replace: String): DocumentMetrics? {
+    val start = documentText.indexOf(search)
+    if (start < 0) return null
+    val previewText = buildString(documentText.length - search.length + replace.length) {
+        append(documentText, 0, start)
+        append(replace)
+        append(documentText, start + search.length, documentText.length)
+    }
+    return DocumentMetrics.fromText(previewText)
 }
 
 private data class ActiveDiff(

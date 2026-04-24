@@ -94,3 +94,31 @@ export interface PostAcceptTaskReworkRow {
   maxLineDelta: number;
   editsAfterAccept: number;
 }
+
+export interface ExportChangeSnapshotRow {
+  pr_id: string;
+  service: string | null;
+  team: string | null;
+  author_id: string | null;
+  submitted_at: string;
+  merged_at: string | null;
+  total_lines_added_at_submission: number | null;
+  total_lines_added_at_merge: number | null;
+  ai_flagged_lines_at_submission: number | null;
+  ai_flagged_lines_at_merge: number | null;
+  ai_submission_pct: number | null;
+  ai_acceptance_pct: number | null;
+  files_changed: string[];
+  ai_tool_hint: string | null;
+  review_cycle_count: number;
+  comments_on_ai_lines: number | null;
+  terminal_outcome: "ACCEPTED" | "REJECTED" | "OPEN";
+  signal_source: "signalcode_telemetry";
+  data_quality: "observed" | "partial" | "derived";
+}
+
+export interface ExportChangeSnapshotsResponse {
+  exportedAt: string;
+  totalRecords: number;
+  records: ExportChangeSnapshotRow[];
+}
