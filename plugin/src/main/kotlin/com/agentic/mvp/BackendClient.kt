@@ -37,15 +37,17 @@ class BackendClient(
 
     fun telemetry(request: TelemetryRequest) {
         try {
-            val httpRequest = HttpRequest.newBuilder()
-                .uri(URI.create("$baseUrl/api/telemetry"))
-                .timeout(Duration.ofSeconds(10))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(request)))
-                .build()
-            client.send(httpRequest, HttpResponse.BodyHandlers.ofString())
+            sendTelemetry(request)
         } catch (_: Exception) {
             // Telemetry must not block user flow.
+        }
+    }
+
+    fun telemetryOrThrow(request: TelemetryRequest) {
+        try {
+            sendTelemetry(request)
+        } catch (error: Exception) {
+            throw IllegalStateException("Failed to call $baseUrl/api/telemetry: ${rootCauseMessage(error)}", error)
         }
     }
 
@@ -82,5 +84,19 @@ class BackendClient(
     private fun rootCauseMessage(error: Throwable): String {
         val root = generateSequence(error) { it.cause }.lastOrNull() ?: error
         return root.message ?: root::class.java.simpleName
+    }
+
+    private fun sendTelemetry(request: TelemetryRequest) {
+        val httpRequest = HttpRequest.newBuilder()
+            .uri(URI.create("$baseUrl/api/telemetry"))
+            .timeout(Duration.ofSeconds(10))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(request)))
+            .build()
+        val response = client.send(httpRequest, HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() !in 200..299) {
+            val detail = extractError(response.body())
+            throw IllegalStateException("HTTP ${response.statusCode()} from backend: $detail")
+        }
     }
 }

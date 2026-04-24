@@ -6,8 +6,8 @@ Cursor-style inline AI editing inside IntelliJ, backed by LiteLLM, an Express AP
 
 - Cleaner model loading UX: the SignalCode Agent dialog now avoids stale "Fetching live models..." copy and only shows model status when there is something actionable, such as falling back to the bundled catalog or having no live models available.
 - Icon-backed IntelliJ experience: the plugin action, main agent dialog, loading dialog, and review modal now use a dedicated SignalCode icon pack for a more polished IDE presentation.
-- Executive demo mode: the IntelliJ plugin now includes a read-only demo walkthrough built around a realistic Java calculator app. It explains what the agent would inspect, change, test, and send to the dashboard without creating real project noise.
-- Mock review flow for demos: demo mode can open the existing plan-review modal with a believable calculator patch so executives can see the end-to-end MVP flow without calling the live generate path.
+- Executive demo mode now runs live against the backend and selected model, starting from an empty IntelliJ folder and building a realistic Java calculator project across multiple files.
+- Demo telemetry is first-class: file creation, accepted generations, IDE activity, and follow-up local edits all flow into the Telemetry Command Center UI so the executive walkthrough reflects a real session.
 
 ## Repo Layout
 
@@ -74,7 +74,8 @@ In sandbox IDE:
 
 - Open a file, select code or place the caret, then press `Alt+\` (or `Ctrl+Alt+K`).
 - Use the SignalCode Agent dialog to choose operation, model, prompt, and target path when needed.
-- Use `Open demo walkthrough` for executive demos, or generate a real plan and review it with Apply/Reject.
+- For executive demos, open an empty folder in IntelliJ and click `Run live demo`.
+- Keep the backend, LiteLLM, and dashboard running before launching demo mode so the plugin can call the real LLM and stream telemetry.
 
 The plugin targets IntelliJ Platform build `241+` (IntelliJ IDEA 2024.1 and newer).
 
@@ -83,8 +84,9 @@ The plugin targets IntelliJ Platform build `241+` (IntelliJ IDEA 2024.1 and newe
 - SignalCode Agent dialog for update, insert, and create-file workflows.
 - Live model discovery from `GET /api/models` with graceful fallback to the bundled model catalog when live availability cannot be fetched.
 - Prompt quick starts, recent prompt history, and active-file context preview.
-- Executive demo mode with a realistic Java calculator scenario and mock patch review.
+- Executive demo mode that generates a Java calculator MVP from zero, patches one of the generated files, and then simulates post-accept human edits.
 - Inline review flow plus telemetry events for `DIFF_RENDERED`, `ACCEPTED`, `REJECTED`, and `ITERATED`.
+- IDE monitor telemetry for opened, created, edited, heartbeat, and post-accept activity signals.
 
 ## How It Works
 
@@ -94,7 +96,7 @@ The plugin targets IntelliJ Platform build `241+` (IntelliJ IDEA 2024.1 and newe
 4. Backend calls LiteLLM and expects strict `SEARCH/REPLACE` style output for patch generation.
 5. Plugin renders the review plan, applies the change on Accept, and records telemetry (`DIFF_RENDERED`, `ACCEPTED`, `REJECTED`, `ITERATED`).
 6. Dashboard visualizes task stats, IDE activity, and post-accept rework.
-7. For executive demos, demo mode opens a realistic read-only walkthrough and mock review flow without changing project files.
+7. For executive demos, demo mode starts in an empty IntelliJ folder, creates a multi-file Java calculator project with the live model, applies a real patch, and then performs a few local follow-up edits so Command Center shows realistic post-accept rework.
 
 ## Core APIs
 
@@ -148,8 +150,10 @@ cd plugin && gradle build --console=plain
   - verify `GEMINI_API_KEY`
   - verify LiteLLM reachable at `http://localhost:4000`
 - Demo mode expectations:
-  - demo walkthrough is intentionally read-only
-  - mock review is for presentation only and does not call the live generate path
+  - open an empty IntelliJ folder before clicking `Run live demo`
+  - demo mode uses the real backend and real model calls
+  - created files, accepted edits, IDE activity, and post-accept follow-up edits should appear in the dashboard
+  - if the folder already contains visible project files, demo mode will stop and ask for a clean directory
 
 ## Security Notes
 

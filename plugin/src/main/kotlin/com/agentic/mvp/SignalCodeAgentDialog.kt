@@ -75,7 +75,7 @@ class SignalCodeAgentDialog(
     private val presetScaffoldButton = JButton("Scaffold file").apply {
         icon = SignalCodeIcons.Target
     }
-    private val demoModeButton = JButton("Open demo walkthrough").apply {
+    private val demoModeButton = JButton("Run live demo").apply {
         icon = SignalCodeIcons.Demo
     }
 
@@ -263,7 +263,11 @@ class SignalCodeAgentDialog(
             promptField.text = "Create a new file that scaffolds the feature described by the surrounding code and project conventions."
         }
         demoModeButton.addActionListener {
-            SignalCodeDemoDialog(projectRef).show()
+            val selectedModel = (modelCombo.selectedItem as? String)?.trim().orEmpty().ifBlank { "gemini-flash" }
+            SignalCodeDemoDialog(
+                projectRef = projectRef,
+                selectedModel = selectedModel
+            ).show()
         }
     }
 
@@ -322,7 +326,7 @@ class SignalCodeAgentDialog(
         return JPanel(BorderLayout(0, 10)).apply {
             add(
                 bodyText(
-                    "Use a realistic Java calculator walkthrough for executive demos. This path previews the agent flow without changing project files."
+                    "Run a real end-to-end demo in an empty IntelliJ project. SignalCode will call the live model, create a Java calculator app across several files, patch existing generated code, and stream telemetry into the dashboard."
                 ),
                 BorderLayout.NORTH
             )
