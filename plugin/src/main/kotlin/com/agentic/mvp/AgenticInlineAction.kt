@@ -6,10 +6,11 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.TextRange
-import com.intellij.ui.components.JBTextField
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -17,11 +18,22 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.awt.Color
 import java.awt.BorderLayout
 import java.awt.Dimension
+import java.awt.FlowLayout
+import java.io.File
+import javax.swing.AbstractAction
+import javax.swing.DefaultComboBoxModel
 import javax.swing.JButton
+import javax.swing.JComboBox
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.JScrollPane
+import javax.swing.JTextArea
+import javax.swing.KeyStroke
+import javax.swing.SwingConstants
+import javax.swing.border.EmptyBorder
 
 class SignalCodeInlineAction : AnAction() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -29,6 +41,9 @@ class SignalCodeInlineAction : AnAction() {
     private val requestVersionTracker = RequestVersionTracker()
     private var activeDiff: ActiveDiff? = null
     private var generateJob: Job? = null
+    private val modelName = "gemini-flash"
+    private val promptHistoryService: PromptHistoryService
+        get() = service()
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
@@ -36,15 +51,90 @@ class SignalCodeInlineAction : AnAction() {
         val psiFile = e.getData(CommonDataKeys.PSI_FILE) ?: return
 
         val contextSnippet = selectedOrCurrentLine(editor)
-        val promptField = JBTextField()
-        promptField.emptyText.text = "Describe your change..."
-        promptField.preferredSize = Dimension(420, 32)
+        val promptField = JTextArea(4, 56).apply {
+            lineWrap = true
+            wrapStyleWord = true
+            border = EmptyBorder(8, 10, 8, 10)
+        }
+        val promptScroller = JScrollPane(promptField).apply {
+            preferredSize = Dimension(560, 100)
+        }
 
         val submitButton = JButton("Generate")
-        val panel = JPanel(BorderLayout(8, 0)).apply {
-            add(JLabel("SignalCode AI Prompt"), BorderLayout.WEST)
-            add(promptField, BorderLayout.CENTER)
-            add(submitButton, BorderLayout.EAST)
+        val clearButton = JButton("Clear")
+        val historyModel = DefaultComboBoxModel<String>()
+        promptHistoryService.recent(MAX_HISTORY).forEach { historyModel.addElement(it) }
+        val historyCombo = JComboBox(historyModel).apply {
+            preferredSize = Dimension(320, 28)
+            isEnabled = historyModel.size > 0
+            toolTipText = "Recent prompts"
+        }
+        val useHistoryButton = JButton("Use")
+        val clearHistoryButton = JButton("Clear History").apply {
+            isEnabled = historyModel.size > 0
+        }
+        val presetRefactorButton = JButton("Refactor")
+        val presetExplainButton = JButton("Explain")
+        val presetOptimizeButton = JButton("Optimize")
+        val titleLabel = JLabel("SignalCode AI", SwingConstants.LEFT).apply {
+            font = font.deriveFont(15f)
+        }
+        val helperLabel = JLabel("Ctrl/Cmd+Enter to generate, Esc to close").apply {
+            foreground = Color(130, 130, 130)
+        }
+        val contextLabel = JLabel(
+            if (editor.selectionModel.hasSelection()) "Using selection context" else "Using current line context"
+        ).apply {
+            foreground = Color(110, 110, 110)
+        }
+
+        val topRow = JPanel(BorderLayout()).apply {
+            add(titleLabel, BorderLayout.WEST)
+            add(contextLabel, BorderLayout.EAST)
+        }
+        val presetRow = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+            add(JLabel("Presets:"))
+            add(presetRefactorButton)
+            add(presetExplainButton)
+            add(presetOptimizeButton)
+        }
+        val historyRow = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+            add(JLabel("History:"))
+            add(historyCombo)
+            add(useHistoryButton)
+            add(clearHistoryButton)
+        }
+        val promptArea = JPanel(BorderLayout(0, 6)).apply {
+            add(presetRow, BorderLayout.NORTH)
+            add(promptScroller, BorderLayout.CENTER)
+            add(historyRow, BorderLayout.SOUTH)
+        }
+        val actionRow = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+            add(clearButton)
+            add(submitButton)
+        }
+        val targetLabel = JLabel(
+            "Target: ${File(psiFile.virtualFile.path).name}  |  Model: $modelName"
+        ).apply {
+            foreground = Color(115, 115, 115)
+        }
+        val panel = JPanel(BorderLayout(0, 8)).apply {
+            border = EmptyBorder(10, 12, 10, 12)
+            add(topRow, BorderLayout.NORTH)
+            add(promptArea, BorderLayout.CENTER)
+            add(
+                JPanel(BorderLayout()).apply {
+                    add(
+                        JPanel(BorderLayout()).apply {
+                            add(helperLabel, BorderLayout.NORTH)
+                            add(targetLabel, BorderLayout.SOUTH)
+                        },
+                        BorderLayout.WEST
+                    )
+                    add(actionRow, BorderLayout.EAST)
+                },
+                BorderLayout.SOUTH
+            )
         }
 
         val popup = JBPopupFactory.getInstance()
@@ -55,15 +145,62 @@ class SignalCodeInlineAction : AnAction() {
             .setTitle("Inline Edit")
             .createPopup()
         popup.showInBestPositionFor(editor)
+        promptField.requestFocusInWindow()
 
-        submitButton.addActionListener {
+        val submitAction = submit@{
             val prompt = promptField.text.trim()
             if (prompt.isEmpty()) {
-                return@addActionListener
+                return@submit
             }
+            submitButton.isEnabled = false
+            submitButton.text = "Generating..."
             popup.cancel()
+            rememberPrompt(prompt)
             submitPrompt(project, editor, prompt, psiFile.virtualFile.path, psiFile.language.id, contextSnippet)
         }
+
+        submitButton.addActionListener {
+            submitAction()
+        }
+
+        clearButton.addActionListener {
+            promptField.text = ""
+            promptField.requestFocusInWindow()
+        }
+        useHistoryButton.addActionListener {
+            val selected = historyCombo.selectedItem as? String ?: return@addActionListener
+            promptField.text = selected
+            promptField.requestFocusInWindow()
+        }
+        clearHistoryButton.addActionListener {
+            promptHistoryService.clear()
+            historyModel.removeAllElements()
+            historyCombo.isEnabled = false
+            useHistoryButton.isEnabled = false
+            clearHistoryButton.isEnabled = false
+            promptField.requestFocusInWindow()
+        }
+        presetRefactorButton.addActionListener {
+            applyPreset(promptField, "Refactor this code for readability and maintainability while preserving behavior.")
+        }
+        presetExplainButton.addActionListener {
+            applyPreset(promptField, "Explain this code with concise comments and rename unclear identifiers for clarity.")
+        }
+        presetOptimizeButton.addActionListener {
+            applyPreset(promptField, "Optimize this code for performance and simplify unnecessary work without changing behavior.")
+        }
+
+        val commandMask = if (SystemInfo.isMac) "meta ENTER" else "control ENTER"
+        val submitKey = KeyStroke.getKeyStroke(commandMask)
+        promptField.inputMap.put(submitKey, "signalcode.submit")
+        promptField.actionMap.put(
+            "signalcode.submit",
+            object : AbstractAction() {
+                override fun actionPerformed(_e: java.awt.event.ActionEvent?) {
+                    submitAction()
+                }
+            }
+        )
     }
 
     private fun submitPrompt(
@@ -226,6 +363,19 @@ class SignalCodeInlineAction : AnAction() {
     private fun formatError(error: Throwable): String {
         val root = generateSequence(error) { it.cause }.lastOrNull() ?: error
         return root.message ?: root::class.java.simpleName
+    }
+
+    private fun applyPreset(promptField: JTextArea, text: String) {
+        promptField.text = text
+        promptField.requestFocusInWindow()
+    }
+
+    private fun rememberPrompt(prompt: String) {
+        promptHistoryService.remember(prompt, MAX_HISTORY)
+    }
+
+    companion object {
+        private const val MAX_HISTORY = 5
     }
 }
 
