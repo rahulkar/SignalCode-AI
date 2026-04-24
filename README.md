@@ -85,7 +85,12 @@ docker compose up
 Expected:
 
 - LiteLLM available at `http://localhost:4000`
-- SQLite logging DB persisted under `litellm/data`
+- LiteLLM serves model aliases directly from `litellm/config.yaml` / `model-catalog.json`
+
+Notes:
+
+- This MVP intentionally runs LiteLLM without Postgres-backed model storage.
+- Keeping the proxy stateless avoids a current LiteLLM config-vs-database issue where `/v1/models` can collapse to a single model and reject other valid aliases.
 
 Model aliases are managed from one source:
 
@@ -375,4 +380,3 @@ Check:
 - Do not commit real API keys (`.env` files should stay local).
 - Telemetry currently stores prompt snippets; avoid sending sensitive production code in unsecured environments.
 - Add transport security and auth before external/shared deployment.
-
