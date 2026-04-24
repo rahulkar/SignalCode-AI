@@ -1,8 +1,8 @@
 <idea-plugin>
     <id>com.signalcode.mvp</id>
-    <name>SignalCode AI Inline MVP</name>
+    <name>SignalCode AI</name>
     <vendor>SignalCode AI</vendor>
-    <description>SignalCode AI inline coding assistant with telemetry.</description>
+    <description>SignalCode AI agent workspace for guided edits, file creation, and telemetry-aware coding workflows.</description>
 
     <depends>com.intellij.modules.platform</depends>
     <extensions defaultExtensionNs="com.intellij">
@@ -13,8 +13,8 @@
     <actions>
         <action id="SignalCodeInlineAction"
                 class="com.signalcode.mvp.SignalCodeInlineAction"
-                text="SignalCode AI Inline Prompt"
-                description="Show inline coding prompt">
+                text="SignalCode AI"
+                description="Open SignalCode AI">
             <keyboard-shortcut keymap="$default" first-keystroke="alt BACK_SLASH"/>
             <keyboard-shortcut keymap="$default" first-keystroke="control alt K"/>
         </action>

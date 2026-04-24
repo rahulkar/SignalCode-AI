@@ -10,11 +10,14 @@ enum class TelemetryEventType {
 data class GenerateRequest(
     val prompt: String,
     val model: String?,
+    val mode: String,
     val context: GenerateContext
 )
 
 data class GenerateContext(
     val filePath: String,
+    val projectRootPath: String?,
+    val targetFilePath: String?,
     val selectionOrCaretSnippet: String,
     val languageId: String?
 )
@@ -23,7 +26,26 @@ data class GenerateResponse(
     val task_id: String,
     val diff_id: String,
     val raw: String,
-    val model: String
+    val model: String,
+    val operation: AgentOperation,
+    val usage: UsageMetrics? = null
+)
+
+data class AgentOperation(
+    val kind: String,
+    val summary: String,
+    val targetFilePath: String,
+    val search: String? = null,
+    val replace: String? = null,
+    val anchor: String? = null,
+    val content: String? = null
+)
+
+data class UsageMetrics(
+    val promptTokens: Int? = null,
+    val completionTokens: Int? = null,
+    val totalTokens: Int? = null,
+    val costUsd: Double? = null
 )
 
 data class TelemetryRequest(

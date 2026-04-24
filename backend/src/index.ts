@@ -3,8 +3,9 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
+import { normalizeAgentOperation } from "./agentPlan.js";
 import { db, initializeDb, resetTelemetryDb } from "./db.js";
-import { fetchAvailableModelIds, generateSearchReplace } from "./litellm.js";
+import { fetchAvailableModelIds, generateAgentPlanText } from "./litellm.js";
 import { defaultModel as generatedDefaultModel, supportedModels } from "./modelCatalog.generated.js";
 import { generateRequestSchema, telemetryRequestSchema } from "./schemas.js";
 import type {
@@ -28,7 +29,9 @@ const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
 
 initializeDb();
 
-type GenerateFn = typeof generateSearchReplace;
+type GenerateFn = (params: Parameters<typeof generateAgentPlanText>[0]) => Promise<
+  string | Awaited<ReturnType<typeof generateAgentPlanText>>
+>;
 type ListModelsFn = typeof fetchAvailableModelIds;
 type SupportedModel = (typeof supportedModels)[number];
 type RangeConfig = { windowMs: number; bucketMs: number };
@@ -55,7 +58,7 @@ function isSupportedModel(model: string): model is SupportedModel {
 
 export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListModelsFn }) {
   const app = express();
-  const generateFn = deps?.generateFn ?? generateSearchReplace;
+  const generateFn = deps?.generateFn ?? generateAgentPlanText;
   const listModelsFn = deps?.listModelsFn ?? fetchAvailableModelIds;
 
   app.use(cors({ origin: corsOrigin }));
@@ -98,6 +101,7 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   }
 
   const { prompt, context } = parsed.data;
+  const mode = parsed.data.mode ?? "update_selection";
   const requestedModel = parsed.data.model?.trim() || defaultModel;
   if (!isSupportedModel(requestedModel)) {
     return res.status(400).json({
@@ -114,14 +118,20 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   try {
     let effectiveModel: SupportedModel = requestedModel;
     let raw: string;
+    let usage: GenerateResponse["usage"];
     try {
-      raw = await generateFn({
+      const generated = normalizeGenerateResult(await generateFn({
         prompt,
         model: effectiveModel,
+        mode,
         filePath: context.filePath,
+        projectRootPath: context.projectRootPath,
         selectionOrCaretSnippet: context.selectionOrCaretSnippet,
+        targetFilePath: context.targetFilePath,
         languageId: context.languageId
-      });
+      }));
+      raw = generated.content;
+      usage = generated.usage;
     } catch (primaryError) {
       const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
       const shouldFallback =
@@ -137,13 +147,23 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
 
       // Retry once with another configured model that is currently live on the proxy.
       effectiveModel = fallbackModel;
-      raw = await generateFn({
+      const generated = normalizeGenerateResult(await generateFn({
         prompt,
         model: effectiveModel,
+        mode,
         filePath: context.filePath,
+        projectRootPath: context.projectRootPath,
         selectionOrCaretSnippet: context.selectionOrCaretSnippet,
+        targetFilePath: context.targetFilePath,
         languageId: context.languageId
-      });
+      }));
+      raw = generated.content;
+      usage = generated.usage;
+    }
+
+    const operation = normalizeAgentOperation(raw, parsed.data);
+    if (!operation) {
+      throw new Error("Model did not return a valid agent operation");
     }
 
     db.prepare(
@@ -155,7 +175,9 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
       task_id: taskId,
       diff_id: diffId,
       raw,
-      model: effectiveModel
+      model: effectiveModel,
+      operation,
+      usage
     };
     return res.json(response);
   } catch (error) {
@@ -831,6 +853,15 @@ async function resolveFallbackModel(
   } catch {
     return requestedModel === defaultModel ? null : defaultModel;
   }
+}
+
+function normalizeGenerateResult(
+  value: Awaited<ReturnType<GenerateFn>>
+): { content: string; usage?: GenerateResponse["usage"] } {
+  if (typeof value === "string") {
+    return { content: value };
+  }
+  return value;
 }
 
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);

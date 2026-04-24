@@ -47,6 +47,28 @@ class InlineDiffSession(private val editor: Editor) {
         return true
     }
 
+    fun renderInsert(anchor: String): Boolean {
+        clear()
+        val document = editor.document
+        val content = document.text
+        val start = content.indexOf(anchor)
+        if (start < 0) {
+            return false
+        }
+        val end = start + anchor.length
+        val anchorAttrs = TextAttributes().apply {
+            backgroundColor = Color(232, 240, 255)
+        }
+        highlighters += editor.markupModel.addRangeHighlighter(
+            start,
+            end,
+            HighlighterLayer.SELECTION - 1,
+            anchorAttrs,
+            HighlighterTargetArea.EXACT_RANGE
+        )
+        return true
+    }
+
     fun accept(project: com.intellij.openapi.project.Project, search: String, replace: String): Boolean {
         val document = editor.document
         val content = document.text
@@ -57,6 +79,26 @@ class InlineDiffSession(private val editor: Editor) {
         val end = start + search.length
         WriteCommandAction.runWriteCommandAction(project) {
             document.replaceString(start, end, replace)
+        }
+        clear()
+        return true
+    }
+
+    fun acceptInsert(project: com.intellij.openapi.project.Project, anchor: String, contentToInsert: String): Boolean {
+        val document = editor.document
+        val content = document.text
+        val start = content.indexOf(anchor)
+        if (start < 0) {
+            return false
+        }
+        val insertOffset = start + anchor.length
+        val separator = when {
+            contentToInsert.isEmpty() -> ""
+            anchor.endsWith("\n") || contentToInsert.startsWith("\n") -> ""
+            else -> "\n"
+        }
+        WriteCommandAction.runWriteCommandAction(project) {
+            document.insertString(insertOffset, separator + contentToInsert)
         }
         clear()
         return true

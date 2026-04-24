@@ -5,12 +5,34 @@ export type TelemetryEventType =
   | "ITERATED";
 
 export type StatsRange = "15m" | "1h" | "24h" | "7d";
+export type GenerateMode = "update_selection" | "insert_into_file" | "create_file";
+export type OperationKind = "replace_range" | "insert_after" | "create_file";
+
+export interface UsageMetrics {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+}
+
+export interface AgentOperation {
+  kind: OperationKind;
+  summary: string;
+  targetFilePath: string;
+  search?: string;
+  replace?: string;
+  anchor?: string;
+  content?: string;
+}
 
 export interface GenerateRequest {
   prompt: string;
   model?: string;
+  mode?: GenerateMode;
   context: {
     filePath: string;
+    projectRootPath?: string;
+    targetFilePath?: string;
     selectionOrCaretSnippet: string;
     languageId?: string;
   };
@@ -21,6 +43,8 @@ export interface GenerateResponse {
   diff_id: string;
   raw: string;
   model: string;
+  operation: AgentOperation;
+  usage?: UsageMetrics;
 }
 
 export interface TelemetryRequest {

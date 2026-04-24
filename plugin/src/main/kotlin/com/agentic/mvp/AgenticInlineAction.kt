@@ -8,8 +8,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.util.SystemInfo
-import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,28 +17,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.awt.Color
-import java.awt.BorderLayout
-import java.awt.Dimension
-import java.awt.FlowLayout
 import java.io.File
-import javax.swing.AbstractAction
-import javax.swing.DefaultComboBoxModel
-import javax.swing.JButton
-import javax.swing.JComboBox
-import javax.swing.JLabel
-import javax.swing.JPanel
-import javax.swing.JScrollPane
-import javax.swing.JTextArea
-import javax.swing.KeyStroke
-import javax.swing.SwingConstants
-import javax.swing.border.EmptyBorder
+import java.nio.file.Files
+import java.nio.file.Paths
 
 class SignalCodeInlineAction : AnAction() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val backendClient = BackendClient("http://localhost:3001")
     private val requestVersionTracker = RequestVersionTracker()
-    private var activeDiff: ActiveDiff? = null
+    private var activeOperation: ActiveOperation? = null
     private var generateJob: Job? = null
     private val promptHistoryService: PromptHistoryService
         get() = service()
@@ -48,248 +34,58 @@ class SignalCodeInlineAction : AnAction() {
         val project = e.project ?: return
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
         val psiFile = e.getData(CommonDataKeys.PSI_FILE) ?: return
-
-        val contextSnippet = selectedOrCurrentLine(editor)
-        val promptField = JTextArea(4, 56).apply {
-            lineWrap = true
-            wrapStyleWord = true
-            border = EmptyBorder(8, 10, 8, 10)
-        }
-        val promptScroller = JScrollPane(promptField).apply {
-            preferredSize = Dimension(560, 100)
-        }
-
-        val submitButton = JButton("Generate")
-        val clearButton = JButton("Clear")
-        val historyModel = DefaultComboBoxModel<String>()
-        promptHistoryService.recent(MAX_HISTORY).forEach { historyModel.addElement(it) }
-        val historyCombo = JComboBox(historyModel).apply {
-            preferredSize = Dimension(320, 28)
-            isEnabled = historyModel.size > 0
-            toolTipText = "Recent prompts"
-        }
-        val useHistoryButton = JButton("Use")
-        val clearHistoryButton = JButton("Clear History").apply {
-            isEnabled = historyModel.size > 0
-        }
-        val modelCombo = JComboBox(FALLBACK_MODELS.toTypedArray()).apply {
-            preferredSize = Dimension(190, 28)
-            selectedItem = promptHistoryService.selectedModel(DEFAULT_MODEL)
-            toolTipText = "Model used for this generation request"
-        }
-        val presetRefactorButton = JButton("Refactor")
-        val presetExplainButton = JButton("Explain")
-        val presetOptimizeButton = JButton("Optimize")
-        val titleLabel = JLabel("SignalCode AI", SwingConstants.LEFT).apply {
-            font = font.deriveFont(15f)
-        }
-        val helperLabel = JLabel("Ctrl/Cmd+Enter to generate, Esc to close").apply {
-            foreground = Color(130, 130, 130)
-        }
-        val contextLabel = JLabel(
-            if (editor.selectionModel.hasSelection()) "Using selection context" else "Using current line context"
-        ).apply {
-            foreground = Color(110, 110, 110)
-        }
-
-        val topRow = JPanel(BorderLayout()).apply {
-            add(titleLabel, BorderLayout.WEST)
-            add(
-                JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
-                    add(JLabel("Model:"))
-                    add(modelCombo)
-                    add(contextLabel)
-                },
-                BorderLayout.EAST
-            )
-        }
-        val presetRow = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
-            add(JLabel("Presets:"))
-            add(presetRefactorButton)
-            add(presetExplainButton)
-            add(presetOptimizeButton)
-        }
-        val historyRow = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
-            add(JLabel("History:"))
-            add(historyCombo)
-            add(useHistoryButton)
-            add(clearHistoryButton)
-        }
-        val promptArea = JPanel(BorderLayout(0, 6)).apply {
-            add(presetRow, BorderLayout.NORTH)
-            add(promptScroller, BorderLayout.CENTER)
-            add(historyRow, BorderLayout.SOUTH)
-        }
-        val actionRow = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
-            add(clearButton)
-            add(submitButton)
-        }
-        val targetLabel = JLabel("Target: ${File(psiFile.virtualFile.path).name}").apply {
-            foreground = Color(115, 115, 115)
-        }
-        val panel = JPanel(BorderLayout(0, 8)).apply {
-            border = EmptyBorder(10, 12, 10, 12)
-            add(topRow, BorderLayout.NORTH)
-            add(promptArea, BorderLayout.CENTER)
-            add(
-                JPanel(BorderLayout()).apply {
-                    add(
-                        JPanel(BorderLayout()).apply {
-                            add(helperLabel, BorderLayout.NORTH)
-                            add(targetLabel, BorderLayout.SOUTH)
-                        },
-                        BorderLayout.WEST
-                    )
-                    add(actionRow, BorderLayout.EAST)
-                },
-                BorderLayout.SOUTH
-            )
-        }
-
-        val popup = JBPopupFactory.getInstance()
-            .createComponentPopupBuilder(panel, promptField)
-            .setRequestFocus(true)
-            .setFocusable(true)
-            .setCancelOnClickOutside(true)
-            .setTitle("Inline Edit")
-            .createPopup()
-        popup.showInBestPositionFor(editor)
-        promptField.requestFocusInWindow()
+        val context = buildContextSnapshot(project, editor, psiFile.virtualFile.path, psiFile.language.id)
+        val dialog = SignalCodeAgentDialog(
+            project = project,
+            context = context,
+            promptHistoryService = promptHistoryService,
+            fallbackModels = FALLBACK_MODELS,
+            defaultModel = promptHistoryService.selectedModel(DEFAULT_MODEL)
+        )
 
         scope.launch {
             val models = runCatching { withContext(Dispatchers.IO) { backendClient.fetchModels() } }.getOrNull() ?: return@launch
             ApplicationManager.getApplication().invokeLater {
-                val currentSelection = (modelCombo.selectedItem as? String) ?: promptHistoryService.selectedModel(DEFAULT_MODEL)
-                val liveModels = models.availableModels
-                    ?.filter { models.supportedModels.contains(it) }
-                    ?.distinct()
-                    .orEmpty()
-                val visibleModels = when {
-                    liveModels.isNotEmpty() -> liveModels
-                    models.supportedModels.isNotEmpty() -> models.supportedModels
-                    else -> FALLBACK_MODELS
-                }
-                modelCombo.removeAllItems()
-                visibleModels.forEach { modelCombo.addItem(it) }
-                val hasLiveAvailability = models.availableModels != null
-                val noLiveModels = hasLiveAvailability && liveModels.isEmpty()
-                modelCombo.isEnabled = visibleModels.isNotEmpty() && !noLiveModels
-                submitButton.isEnabled = !noLiveModels
-                helperLabel.text = when {
-                    noLiveModels -> "No live models available right now"
-                    hasLiveAvailability -> "Ctrl/Cmd+Enter to generate, using live model list"
-                    else -> "Ctrl/Cmd+Enter to generate, Esc to close"
-                }
-                val preferred = when {
-                    visibleModels.contains(currentSelection) -> currentSelection
-                    visibleModels.contains(models.defaultModel) -> models.defaultModel
-                    visibleModels.isNotEmpty() -> visibleModels.first()
-                    else -> DEFAULT_MODEL
-                }
-                modelCombo.selectedItem = preferred
+                dialog.updateAvailableModels(models, promptHistoryService.selectedModel(DEFAULT_MODEL))
             }
         }
 
-        val submitAction = submit@{
-            val prompt = promptField.text.trim()
-            if (prompt.isEmpty()) {
-                return@submit
-            }
-            if (modelCombo.itemCount == 0 || !modelCombo.isEnabled) {
-                notify(project, "No live models are currently available.", NotificationType.WARNING)
-                return@submit
-            }
-            val selectedModel = (modelCombo.selectedItem as? String)?.trim().orEmpty().ifEmpty { DEFAULT_MODEL }
-            promptHistoryService.setSelectedModel(selectedModel)
-            submitButton.isEnabled = false
-            submitButton.text = "Generating..."
-            popup.cancel()
-            rememberPrompt(prompt)
-            submitPrompt(
-                project = project,
-                editor = editor,
-                prompt = prompt,
-                model = selectedModel,
-                filePath = psiFile.virtualFile.path,
-                languageId = psiFile.language.id,
-                snippet = contextSnippet
-            )
+        if (!dialog.showAndGet()) {
+            return
         }
 
-        submitButton.addActionListener {
-            submitAction()
-        }
-
-        clearButton.addActionListener {
-            promptField.text = ""
-            promptField.requestFocusInWindow()
-        }
-        useHistoryButton.addActionListener {
-            val selected = historyCombo.selectedItem as? String ?: return@addActionListener
-            promptField.text = selected
-            promptField.requestFocusInWindow()
-        }
-        clearHistoryButton.addActionListener {
-            promptHistoryService.clear()
-            historyModel.removeAllElements()
-            historyCombo.isEnabled = false
-            useHistoryButton.isEnabled = false
-            clearHistoryButton.isEnabled = false
-            promptField.requestFocusInWindow()
-        }
-        presetRefactorButton.addActionListener {
-            applyPreset(promptField, "Refactor this code for readability and maintainability while preserving behavior.")
-        }
-        presetExplainButton.addActionListener {
-            applyPreset(promptField, "Explain this code with concise comments and rename unclear identifiers for clarity.")
-        }
-        presetOptimizeButton.addActionListener {
-            applyPreset(promptField, "Optimize this code for performance and simplify unnecessary work without changing behavior.")
-        }
-
-        val commandMask = if (SystemInfo.isMac) "meta ENTER" else "control ENTER"
-        val submitKey = KeyStroke.getKeyStroke(commandMask)
-        promptField.inputMap.put(submitKey, "signalcode.submit")
-        promptField.actionMap.put(
-            "signalcode.submit",
-            object : AbstractAction() {
-                override fun actionPerformed(_e: java.awt.event.ActionEvent?) {
-                    submitAction()
-                }
-            }
-        )
+        val submission = dialog.submission ?: return
+        promptHistoryService.setSelectedModel(submission.model)
+        rememberPrompt(submission.prompt)
+        submitPrompt(project, editor, context, submission)
     }
 
     private fun submitPrompt(
-        project: com.intellij.openapi.project.Project,
+        project: Project,
         editor: Editor,
-        prompt: String,
-        model: String,
-        filePath: String,
-        languageId: String?,
-        snippet: String
+        context: EditorContextSnapshot,
+        submission: AgentDialogSubmission
     ) {
         val requestVersion = requestVersionTracker.next()
-
-        val previous = activeDiff
+        val previous = activeOperation
         if (previous != null) {
-            scope.launch(Dispatchers.IO) {
-                runCatching {
-                    backendClient.telemetry(
-                        TelemetryRequest(
-                            task_id = previous.taskId,
-                            diff_id = previous.diffId,
-                            event = TelemetryEventType.ITERATED,
-                            meta = previous.meta + mapOf("fileAction" to "edited")
-                        )
-                    )
-                }
-            }
-            previous.session.clear()
-            activeDiff = null
+            emitTelemetry(
+                TelemetryRequest(
+                    task_id = previous.taskId,
+                    diff_id = previous.diffId,
+                    event = TelemetryEventType.ITERATED,
+                    meta = previous.meta + mapOf("fileAction" to fileActionFor(previous.operation.kind))
+                )
+            )
+            previous.session?.clear()
+            activeOperation = null
         }
 
         val previousJob = generateJob
+        val loadingDialog = SignalCodeLoadingDialog(project, "Generating plan and waiting for backend response…")
+        ApplicationManager.getApplication().invokeLater {
+            loadingDialog.show()
+        }
         generateJob = scope.launch {
             if (previousJob != null && previousJob.isActive) {
                 previousJob.cancelAndJoin()
@@ -298,157 +94,278 @@ class SignalCodeInlineAction : AnAction() {
                 val response = withContext(Dispatchers.IO) {
                     backendClient.generate(
                         GenerateRequest(
-                            prompt = prompt,
-                            model = model,
+                            prompt = submission.prompt,
+                            model = submission.model,
+                            mode = submission.mode.apiValue,
                             context = GenerateContext(
-                                filePath = filePath,
-                                selectionOrCaretSnippet = snippet,
-                                languageId = languageId
+                                filePath = context.filePath,
+                                projectRootPath = context.projectRootPath,
+                                targetFilePath = submission.targetFilePath,
+                                selectionOrCaretSnippet = context.contextSnippet,
+                                languageId = context.languageId
                             )
                         )
                     )
                 }
-                if (response.model != model) {
-                    notify(project, "Selected model '$model' was unavailable. Used '${response.model}' instead.", NotificationType.INFORMATION)
+                if (response.model != submission.model) {
+                    notify(
+                        project,
+                        "Selected model '${submission.model}' was unavailable. Used '${response.model}' instead.",
+                        NotificationType.INFORMATION
+                    )
                 }
-                val parsed = DiffParser.parse(response.raw)
-                if (parsed == null) {
-                    notify(project, "Model response was not valid SEARCH/REPLACE.", NotificationType.WARNING)
-                    return@launch
-                }
+
+                val operation = response.operation
+                val meta = buildOperationMeta(context, submission, operation, response.usage)
+                val previewMetrics = buildPreviewMetrics(editor.document.text, context.filePath, operation)
+                val session = renderPreviewSession(editor, context.filePath, operation)
+
                 ApplicationManager.getApplication().invokeLater {
                     if (!requestVersionTracker.isCurrent(requestVersion)) {
+                        session?.clear()
                         return@invokeLater
                     }
-                    val session = InlineDiffSession(editor)
-                    val rendered = session.render(parsed.search, parsed.replace)
-                    if (!rendered) {
-                        notify(project, "Could not locate SEARCH block in document.", NotificationType.WARNING)
-                        return@invokeLater
-                    }
-                    activeDiff = ActiveDiff(
-                        response.task_id,
-                        response.diff_id,
-                        parsed.search,
-                        parsed.replace,
-                        session,
-                        mapOf("filePath" to filePath, "languageId" to (languageId ?: "unknown"))
+                    activeOperation = ActiveOperation(
+                        taskId = response.task_id,
+                        diffId = response.diff_id,
+                        operation = operation,
+                        session = session,
+                        meta = meta,
+                        usage = response.usage
                     )
-                    showAcceptRejectPopup(project, editor, activeDiff!!)
-                    val renderedMetrics = buildRenderedDocumentMetrics(editor.document.text, parsed.search, parsed.replace)
-                    scope.launch(Dispatchers.IO) {
-                        runCatching {
-                            backendClient.telemetry(
-                                TelemetryRequest(
-                                    task_id = response.task_id,
-                                    diff_id = response.diff_id,
-                                    event = TelemetryEventType.DIFF_RENDERED,
-                                    meta = mapOf(
-                                        "filePath" to filePath,
-                                        "languageId" to (languageId ?: "unknown"),
-                                        "fileAction" to "opened"
-                                    )
-                                        .plus(renderedMetrics?.toMeta().orEmpty())
-                                )
-                            )
-                        }
-                    }
+                    emitTelemetry(
+                        TelemetryRequest(
+                            task_id = response.task_id,
+                            diff_id = response.diff_id,
+                            event = TelemetryEventType.DIFF_RENDERED,
+                            meta = meta
+                                .plus(mapOf("fileAction" to fileActionFor(operation.kind)))
+                                .plus(previewMetrics?.toMeta().orEmpty())
+                        )
+                    )
+                    showPreviewDialog(project, editor, context)
                 }
             } catch (error: Throwable) {
                 notify(project, "Generate failed: ${formatError(error)}", NotificationType.ERROR)
+            } finally {
+                ApplicationManager.getApplication().invokeLater {
+                    loadingDialog.close()
+                }
             }
         }
     }
 
-    private fun showAcceptRejectPopup(
-        project: com.intellij.openapi.project.Project,
+    private fun showPreviewDialog(project: Project, editor: Editor, context: EditorContextSnapshot) {
+        val active = activeOperation ?: return
+        val accepted = SignalCodePlanPreviewDialog(project, active.operation, active.usage).showAndGet()
+        if (activeOperation?.diffId != active.diffId) {
+            active.session?.clear()
+            return
+        }
+
+        if (!accepted) {
+            active.session?.clear()
+            emitTelemetry(
+                TelemetryRequest(
+                    task_id = active.taskId,
+                    diff_id = active.diffId,
+                    event = TelemetryEventType.REJECTED,
+                    meta = active.meta + mapOf("fileAction" to fileActionFor(active.operation.kind))
+                )
+            )
+            activeOperation = null
+            return
+        }
+
+        val applyResult = applyOperation(project, editor, context, active)
+        if (!applyResult.success) {
+            active.session?.clear()
+            emitTelemetry(
+                TelemetryRequest(
+                    task_id = active.taskId,
+                    diff_id = active.diffId,
+                    event = TelemetryEventType.REJECTED,
+                    meta = active.meta + mapOf(
+                        "fileAction" to fileActionFor(active.operation.kind),
+                        "applyFailed" to true,
+                        "applyError" to applyResult.message
+                    )
+                )
+            )
+            notify(project, applyResult.message, NotificationType.WARNING)
+            activeOperation = null
+            return
+        }
+
+        val acceptedText = readAcceptedText(editor, context.filePath, applyResult.targetFilePath, active.operation)
+        val acceptedMetrics = acceptedText?.let { DocumentMetrics.fromText(it) }
+        if (!acceptedText.isNullOrBlank()) {
+            PostAcceptTracker.registerAccepted(
+                taskId = active.taskId,
+                acceptedDiffId = active.diffId,
+                filePath = applyResult.targetFilePath,
+                acceptedText = acceptedText
+            )
+        }
+        emitTelemetry(
+            TelemetryRequest(
+                task_id = active.taskId,
+                diff_id = active.diffId,
+                event = TelemetryEventType.ACCEPTED,
+                meta = active.meta
+                    .plus(mapOf("fileAction" to fileActionFor(active.operation.kind)))
+                    .plus(acceptedMetrics?.toMeta().orEmpty())
+            )
+        )
+        notify(project, applyResult.message, NotificationType.INFORMATION)
+        activeOperation = null
+    }
+
+    private fun applyOperation(
+        project: Project,
         editor: Editor,
-        diff: ActiveDiff
-    ) {
-        val acceptButton = JButton("Accept")
-        val rejectButton = JButton("Reject")
-        val panel = JPanel().apply {
-            add(acceptButton)
-            add(rejectButton)
-        }
-        val popup = JBPopupFactory.getInstance()
-            .createComponentPopupBuilder(panel, acceptButton)
-            .setRequestFocus(false)
-            .setFocusable(false)
-            .setCancelOnClickOutside(false)
-            .setTitle("Apply AI Diff")
-            .createPopup()
-        popup.showInBestPositionFor(editor)
-
-        acceptButton.addActionListener {
-            if (activeDiff?.diffId != diff.diffId) {
-                popup.cancel()
-                return@addActionListener
+        context: EditorContextSnapshot,
+        active: ActiveOperation
+    ): ApplyResult {
+        val operation = active.operation
+        val targetsCurrentFile = samePath(operation.targetFilePath, context.filePath)
+        if (targetsCurrentFile && active.session != null) {
+            val applied = when (operation.kind) {
+                "replace_range" -> active.session.accept(project, operation.search.orEmpty(), operation.replace.orEmpty())
+                "insert_after" -> active.session.acceptInsert(project, operation.anchor.orEmpty(), operation.content.orEmpty())
+                else -> false
             }
-            val applied = diff.session.accept(project, diff.search, diff.replace)
             if (applied) {
-                val filePath = diff.meta["filePath"] as? String
-                val acceptedMetrics = DocumentMetrics.fromText(editor.document.text)
-                if (!filePath.isNullOrBlank()) {
-                    PostAcceptTracker.registerAccepted(
-                        taskId = diff.taskId,
-                        acceptedDiffId = diff.diffId,
-                        filePath = filePath,
-                        acceptedText = editor.document.text
-                    )
-                }
-                scope.launch(Dispatchers.IO) {
-                    runCatching {
-                        backendClient.telemetry(
-                            TelemetryRequest(
-                                diff.taskId,
-                                diff.diffId,
-                                TelemetryEventType.ACCEPTED,
-                                diff.meta + mapOf("fileAction" to "edited") + acceptedMetrics.toMeta()
-                            )
-                        )
-                    }
-                }
+                return ApplyResult(true, successMessage(operation.kind, operation.targetFilePath), context.filePath)
             }
-            popup.cancel()
-            activeDiff = null
         }
+        return AgentOperationApplier.apply(project, operation, context.filePath)
+    }
 
-        rejectButton.addActionListener {
-            if (activeDiff?.diffId != diff.diffId) {
-                popup.cancel()
-                return@addActionListener
-            }
-            diff.session.clear()
-            scope.launch(Dispatchers.IO) {
-                runCatching {
-                    backendClient.telemetry(
-                        TelemetryRequest(
-                            diff.taskId,
-                            diff.diffId,
-                            TelemetryEventType.REJECTED,
-                            diff.meta + mapOf("fileAction" to "added")
-                        )
-                    )
+    private fun renderPreviewSession(editor: Editor, currentFilePath: String, operation: AgentOperation): InlineDiffSession? {
+        if (!samePath(currentFilePath, operation.targetFilePath)) {
+            return null
+        }
+        val session = InlineDiffSession(editor)
+        val rendered = when (operation.kind) {
+            "replace_range" -> session.render(operation.search.orEmpty(), operation.replace.orEmpty())
+            "insert_after" -> session.renderInsert(operation.anchor.orEmpty())
+            else -> false
+        }
+        return if (rendered) session else null
+    }
+
+    private fun buildContextSnapshot(
+        project: Project,
+        editor: Editor,
+        filePath: String,
+        languageId: String?
+    ): EditorContextSnapshot {
+        val hasSelection = editor.selectionModel.hasSelection()
+        val contextSnippet = if (hasSelection) {
+            editor.selectionModel.selectedText.orEmpty()
+        } else {
+            nearbySnippet(editor)
+        }
+        return EditorContextSnapshot(
+            contextSnippet = contextSnippet,
+            contextLabel = if (hasSelection) "Selected code" else "Nearby code context",
+            filePath = filePath,
+            languageId = languageId,
+            fileName = File(filePath).name,
+            projectRootPath = project.basePath
+        )
+    }
+
+    private fun nearbySnippet(editor: Editor): String {
+        val document = editor.document
+        val currentLine = document.getLineNumber(editor.caretModel.offset)
+        val startLine = (currentLine - 4).coerceAtLeast(0)
+        val endLine = (currentLine + 4).coerceAtMost(document.lineCount - 1)
+        val startOffset = document.getLineStartOffset(startLine)
+        val endOffset = document.getLineEndOffset(endLine)
+        return document.getText(TextRange(startOffset, endOffset))
+    }
+
+    private fun buildOperationMeta(
+        context: EditorContextSnapshot,
+        submission: AgentDialogSubmission,
+        operation: AgentOperation,
+        usage: UsageMetrics?
+    ): Map<String, Any> {
+        val generatedText = when (operation.kind) {
+            "replace_range" -> operation.replace.orEmpty()
+            "insert_after", "create_file" -> operation.content.orEmpty()
+            else -> ""
+        }
+        return mapOf(
+            "workflow" to "agentic-intellij",
+            "mode" to submission.mode.apiValue,
+            "operationKind" to operation.kind,
+            "filePath" to operation.targetFilePath,
+            "languageId" to (context.languageId ?: "unknown"),
+            "promptChars" to submission.prompt.length,
+            "contextChars" to context.contextSnippet.length,
+            "generatedChars" to generatedText.length,
+            "generatedLines" to lineCount(generatedText),
+            "targetFileProvided" to !submission.targetFilePath.isNullOrBlank()
+        ) + usage.toMeta()
+    }
+
+    private fun buildPreviewMetrics(
+        currentDocumentText: String,
+        currentFilePath: String,
+        operation: AgentOperation
+    ): DocumentMetrics? {
+        return when (operation.kind) {
+            "replace_range" -> {
+                if (!samePath(currentFilePath, operation.targetFilePath)) {
+                    null
+                } else {
+                    buildRenderedDocumentMetrics(currentDocumentText, operation.search.orEmpty(), operation.replace.orEmpty())
                 }
             }
-            popup.cancel()
-            activeDiff = null
+            "insert_after" -> {
+                if (!samePath(currentFilePath, operation.targetFilePath)) {
+                    null
+                } else {
+                    buildInsertPreviewMetrics(currentDocumentText, operation.anchor.orEmpty(), operation.content.orEmpty())
+                }
+            }
+            "create_file" -> DocumentMetrics.fromText(operation.content.orEmpty())
+            else -> null
         }
     }
 
-    private fun selectedOrCurrentLine(editor: Editor): String {
-        val selectionModel = editor.selectionModel
-        if (selectionModel.hasSelection()) {
-            return selectionModel.selectedText ?: ""
+    private fun readAcceptedText(
+        editor: Editor,
+        currentFilePath: String,
+        targetFilePath: String,
+        operation: AgentOperation
+    ): String? {
+        if (samePath(currentFilePath, targetFilePath)) {
+            return editor.document.text
         }
-        val line = editor.document.getLineNumber(editor.caretModel.offset)
-        val startOffset = editor.document.getLineStartOffset(line)
-        val endOffset = editor.document.getLineEndOffset(line)
-        return editor.document.getText(TextRange(startOffset, endOffset))
+        if (operation.kind == "create_file") {
+            return operation.content
+        }
+        return runCatching {
+            val target = Paths.get(targetFilePath)
+            if (Files.exists(target)) Files.readString(target) else null
+        }.getOrNull()
     }
 
-    private fun notify(project: com.intellij.openapi.project.Project, content: String, type: NotificationType) {
+    private fun samePath(left: String, right: String): Boolean = runCatching {
+        Paths.get(left).normalize() == Paths.get(right).normalize()
+    }.getOrDefault(left == right)
+
+    private fun emitTelemetry(request: TelemetryRequest) {
+        scope.launch(Dispatchers.IO) {
+            runCatching { backendClient.telemetry(request) }
+        }
+    }
+
+    private fun notify(project: Project, content: String, type: NotificationType) {
         ApplicationManager.getApplication().invokeLater {
             NotificationGroupManager.getInstance()
                 .getNotificationGroup("SignalCodeNotifications")
@@ -457,18 +374,24 @@ class SignalCodeInlineAction : AnAction() {
         }
     }
 
+    private fun rememberPrompt(prompt: String) {
+        promptHistoryService.remember(prompt, MAX_HISTORY)
+    }
+
+    private fun successMessage(kind: String, targetFilePath: String): String = when (kind) {
+        "insert_after" -> "Added code to ${File(targetFilePath).name}"
+        "create_file" -> "Created ${File(targetFilePath).name}"
+        else -> "Updated ${File(targetFilePath).name}"
+    }
+
+    private fun fileActionFor(kind: String): String = when (kind) {
+        "create_file" -> "created"
+        else -> "edited"
+    }
+
     private fun formatError(error: Throwable): String {
         val root = generateSequence(error) { it.cause }.lastOrNull() ?: error
         return root.message ?: root::class.java.simpleName
-    }
-
-    private fun applyPreset(promptField: JTextArea, text: String) {
-        promptField.text = text
-        promptField.requestFocusInWindow()
-    }
-
-    private fun rememberPrompt(prompt: String) {
-        promptHistoryService.remember(prompt, MAX_HISTORY)
     }
 
     companion object {
@@ -499,11 +422,6 @@ private data class DocumentMetrics(
             acceptedChars = text.length,
             acceptedLines = lineCount(text)
         )
-
-        private fun lineCount(text: String): Int {
-            if (text.isEmpty()) return 0
-            return text.count { it == '\n' } + 1
-        }
     }
 }
 
@@ -518,11 +436,44 @@ private fun buildRenderedDocumentMetrics(documentText: String, search: String, r
     return DocumentMetrics.fromText(previewText)
 }
 
-private data class ActiveDiff(
+private fun buildInsertPreviewMetrics(documentText: String, anchor: String, insertedContent: String): DocumentMetrics? {
+    val start = documentText.indexOf(anchor)
+    if (start < 0) return null
+    val insertOffset = start + anchor.length
+    val separator = when {
+        insertedContent.isEmpty() -> ""
+        anchor.endsWith("\n") || insertedContent.startsWith("\n") -> ""
+        else -> "\n"
+    }
+    val previewText = buildString(documentText.length + separator.length + insertedContent.length) {
+        append(documentText, 0, insertOffset)
+        append(separator)
+        append(insertedContent)
+        append(documentText, insertOffset, documentText.length)
+    }
+    return DocumentMetrics.fromText(previewText)
+}
+
+private fun lineCount(text: String): Int {
+    if (text.isEmpty()) return 0
+    return text.count { it == '\n' } + 1
+}
+
+private data class ActiveOperation(
     val taskId: String,
     val diffId: String,
-    val search: String,
-    val replace: String,
-    val session: InlineDiffSession,
-    val meta: Map<String, Any>
+    val operation: AgentOperation,
+    val session: InlineDiffSession?,
+    val meta: Map<String, Any>,
+    val usage: UsageMetrics?
 )
+
+private fun UsageMetrics?.toMeta(): Map<String, Any> {
+    if (this == null) return emptyMap()
+    val meta = mutableMapOf<String, Any>()
+    promptTokens?.let { meta["promptTokens"] = it }
+    completionTokens?.let { meta["completionTokens"] = it }
+    totalTokens?.let { meta["totalTokens"] = it }
+    costUsd?.let { meta["costUsd"] = it }
+    return meta
+}

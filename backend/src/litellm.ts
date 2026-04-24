@@ -1,15 +1,25 @@
-const SYSTEM_PROMPT = `You are an expert coding assistant.
-Return exactly one edit block in this format and nothing else (no markdown, no \`\`\` fences):
-<<<<SEARCH
-[exact original code]
-====
-[exact new code]
->>>>REPLACE
+const SYSTEM_PROMPT = `You are an expert coding assistant for an IntelliJ plugin.
+Return exactly one JSON object and nothing else.
+
+Schema:
+{
+  "kind": "replace_range" | "insert_after" | "create_file",
+  "summary": "Short one-line summary",
+  "targetFilePath": "path/to/file.ext",
+  "search": "exact existing code to replace",
+  "replace": "full replacement code",
+  "anchor": "exact existing code after which new code should be inserted",
+  "content": "full new content"
+}
 
 Rules:
-1) SEARCH must match the original snippet exactly.
-2) REPLACE must be complete replacement code.
-3) No commentary, no diff headers, no other text outside the block.`;
+1) Use only one operation.
+2) For "replace_range", include "search" and "replace".
+3) For "insert_after", include "anchor" and "content".
+4) For "create_file", include "targetFilePath" and "content".
+5) Match the requested mode unless the instruction clearly requires a safer operation.
+6) SEARCH or anchor text must match existing code exactly when you reference current code.
+7) No markdown, no code fences, and no commentary outside the JSON object.`;
 
 interface LiteLlmResponse {
   choices?: Array<{
@@ -17,6 +27,17 @@ interface LiteLlmResponse {
       content?: string;
     };
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    cost?: number;
+    response_cost?: number;
+  };
+  response_cost?: number;
+  _hidden_params?: {
+    response_cost?: number;
+  };
 }
 
 interface LiteLlmModelsResponse {
@@ -34,135 +55,24 @@ function jitter(baseMs: number): number {
   return baseMs + Math.floor(Math.random() * (delta * 2 + 1)) - delta;
 }
 
-function stripOuterMarkdownFences(raw: string): string {
-  let t = raw.replace(/\r\n/g, "\n").trim();
-  for (let i = 0; i < 3; i++) {
-    const wrapped = t.match(/^```[^\n]*\n?([\s\S]*?)\n?```\s*$/);
-    if (!wrapped) {
-      break;
-    }
-    t = wrapped[1].trim();
-  }
-  t = t.replace(/^```[^\n]*\n?/, "").replace(/\n?```\s*$/, "").trim();
-  return t;
-}
-
-/** Remove common diff / model junk before the real source starts. */
-function stripDiffNoise(block: string): string {
-  let b = block.replace(/\r\n/g, "\n").trim();
-  const lines = b.split("\n");
-  if (lines[0] && /^diff\b/i.test(lines[0])) {
-    b = lines.slice(1).join("\n").trim();
-  }
-  b = b.replace(/^---[^\n]*\n\+\+\+[^\n]*\n(@@[^\n]*\n)?/, "");
-  // Same-line: `diff path"; import` → drop through first import/export/const
-  b = b.replace(/^diff\s+[^\n]+?(?=\bimport\b|\bexport\b|\bconst\b|\blet\b|\bvar\b|\bfunction\b|\bclass\b|\/\*)/i, "");
-  return b.trim();
-}
-
-/**
- * If the model prefixed garbage, align to the user's snippet when it appears in `search`.
- */
-function alignSearchWithHint(search: string, hint: string): string {
-  const h = hint.replace(/\r\n/g, "\n").trim();
-  if (!h) {
-    return search;
-  }
-  const s = search.replace(/\r\n/g, "\n");
-  let idx = s.indexOf(h);
-  if (idx >= 0) {
-    return s.slice(idx).trimEnd();
-  }
-  const hLine = h.split("\n").find((l) => l.trim().length > 0);
-  if (hLine) {
-    const t = hLine.trim();
-    idx = s.indexOf(t);
-    if (idx >= 0) {
-      return s.slice(idx).trimEnd();
-    }
-  }
-  return search;
-}
-
-function tryCanonicalMarkers(text: string): string | null {
-  const m = text.match(/<<<<\s*SEARCH\s*\n([\s\S]*?)\n====\s*\n([\s\S]*?)\n>>>>\s*REPLACE/im);
-  if (!m) {
-    return null;
-  }
-  return `<<<<SEARCH\n${m[1]}\n====\n${m[2]}\n>>>>REPLACE`;
-}
-
-/** Models often emit old/new separated only by a line of ==== (inside ```diff). */
-function tryEqualsDelimiterBlock(text: string, hintSnippet: string): string | null {
-  const norm = text.replace(/\r\n/g, "\n");
-  const delim = norm.match(/\r?\n====\r?\n/);
-  if (!delim || delim.index === undefined) {
-    return null;
-  }
-  const d = delim[0];
-  let search = norm.slice(0, delim.index).trim();
-  let replace = norm.slice(delim.index + d.length).trim();
-  search = stripDiffNoise(search);
-  replace = stripDiffNoise(replace);
-  search = alignSearchWithHint(search, hintSnippet);
-  if (search.length < 2 || replace.length < 2) {
-    return null;
-  }
-  return `<<<<SEARCH\n${search}\n====\n${replace}\n>>>>REPLACE`;
-}
-
-function normalizeSearchReplace(raw: string, hintSnippet: string): string | null {
-  let text = stripOuterMarkdownFences(raw);
-
-  const canonical = tryCanonicalMarkers(text);
-  if (canonical) {
-    return canonical;
-  }
-
-  const relaxed = text.match(
-    /<<<<\s*SEARCH\s*\n([\s\S]*?)\n====\s*\n([\s\S]*?)(?:\n>>>>\s*REPLACE)?$/im
-  );
-  if (relaxed) {
-    return `<<<<SEARCH\n${relaxed[1]}\n====\n${relaxed[2]}\n>>>>REPLACE`;
-  }
-
-  const fallback = tryEqualsDelimiterBlock(text, hintSnippet);
-  if (fallback) {
-    return fallback;
-  }
-
-  const cleaned = stripDiffNoise(text).trim();
-  if (isLikelyCode(cleaned) && hintSnippet.trim().length > 0) {
-    return `<<<<SEARCH\n${hintSnippet.trim()}\n====\n${cleaned}\n>>>>REPLACE`;
-  }
-
-  return null;
-}
-
-function isLikelyCode(text: string): boolean {
-  if (text.length < 3) {
-    return false;
-  }
-  const signalPatterns = [
-    /[{};]/,
-    /\n/,
-    /\b(import|export|const|let|var|function|class|interface|type)\b/,
-    /@tailwind\b/,
-    /<\/?[a-zA-Z][^>]*>/,
-    /\breturn\b/
-  ];
-  const signalHits = signalPatterns.reduce((acc, pattern) => acc + (pattern.test(text) ? 1 : 0), 0);
-  const sentenceLike = /[.?!]\s+[A-Z]/.test(text);
-  return signalHits >= 2 && !sentenceLike;
-}
-
-export async function generateSearchReplace(params: {
+export async function generateAgentPlanText(params: {
   prompt: string;
   filePath: string;
   selectionOrCaretSnippet: string;
+  projectRootPath?: string;
+  targetFilePath?: string;
   languageId?: string;
+  mode?: string;
   model?: string;
-}): Promise<string> {
+}): Promise<{
+  content: string;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    costUsd?: number;
+  };
+}> {
   const baseUrl = process.env.LITELLM_BASE_URL ?? "http://localhost:4000";
   const model = params.model ?? process.env.LITELLM_MODEL ?? "gemini-flash";
   const apiKey = process.env.LITELLM_API_KEY;
@@ -175,7 +85,10 @@ export async function generateSearchReplace(params: {
       { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
-        content: `File: ${params.filePath}
+        content: `Project root: ${params.projectRootPath ?? "unknown"}
+Current file: ${params.filePath}
+Requested mode: ${params.mode ?? "update_selection"}
+Requested target path: ${params.targetFilePath ?? "current file"}
 Language: ${params.languageId ?? "unknown"}
 Selected snippet:
 ${params.selectionOrCaretSnippet}
@@ -189,7 +102,7 @@ ${params.prompt}`
   let response: Response | null = null;
   let lastErrorBody = "";
   const maxAttempts = 3;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       response = await fetch(url, {
         method: "POST",
@@ -200,16 +113,13 @@ ${params.prompt}`
         body: payload,
         signal: AbortSignal.timeout(120_000)
       });
-    } catch (e) {
-      const name = e instanceof Error ? e.name : "";
-      const msg = e instanceof Error ? e.message : String(e);
-      const hint =
-        name === "AbortError" || msg.includes("timeout")
-          ? " (timed out after 120s)"
-          : "";
+    } catch (error) {
+      const name = error instanceof Error ? error.name : "";
+      const message = error instanceof Error ? error.message : String(error);
+      const hint = name === "AbortError" || message.includes("timeout") ? " (timed out after 120s)" : "";
       throw new Error(
-        `Cannot reach LiteLLM at ${baseUrl}${hint}: ${msg}. ` +
-          `If the proxy runs in Docker, ensure it is up (e.g. docker compose up litellm) and ` +
+        `Cannot reach LiteLLM at ${baseUrl}${hint}: ${message}. ` +
+          `If the proxy runs in Docker, ensure it is up (for example: docker compose up litellm) and ` +
           `when the backend runs on the host set LITELLM_BASE_URL=http://localhost:4000.`
       );
     }
@@ -237,11 +147,42 @@ ${params.prompt}`
   if (!content) {
     throw new Error("LiteLLM returned empty content");
   }
-  const normalized = normalizeSearchReplace(content, params.selectionOrCaretSnippet);
-  if (!normalized) {
-    throw new Error(`Model did not return valid SEARCH/REPLACE block. Raw response: ${content}`);
+  const usage = normalizeUsage(data);
+  return {
+    content,
+    usage
+  };
+}
+
+function normalizeUsage(data: LiteLlmResponse): {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+} | undefined {
+  const promptTokens = finiteNumber(data.usage?.prompt_tokens);
+  const completionTokens = finiteNumber(data.usage?.completion_tokens);
+  const totalTokens = finiteNumber(data.usage?.total_tokens);
+  const costUsd =
+    finiteNumber(data.usage?.response_cost) ??
+    finiteNumber(data.usage?.cost) ??
+    finiteNumber(data.response_cost) ??
+    finiteNumber(data._hidden_params?.response_cost);
+
+  if (promptTokens == null && completionTokens == null && totalTokens == null && costUsd == null) {
+    return undefined;
   }
-  return normalized;
+
+  return {
+    promptTokens: promptTokens ?? undefined,
+    completionTokens: completionTokens ?? undefined,
+    totalTokens: totalTokens ?? undefined,
+    costUsd: costUsd ?? undefined
+  };
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 export async function fetchAvailableModelIds(): Promise<string[]> {

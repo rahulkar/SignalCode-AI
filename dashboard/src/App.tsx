@@ -20,11 +20,11 @@ import { ActivityTable, ChartPanel, ControlPanel, IdeEventDebugPanel, KpiGrid, P
 const AUTO_REFRESH_OPTIONS = [0, 5000, 10000, 30000] as const;
 const TIME_RANGES = ["15m", "1h", "24h", "7d"] as const;
 const PIE_TOOLTIP_STYLE = {
-  backgroundColor: "#0f172a",
-  border: "1px solid rgba(148, 163, 184, 0.18)",
-  borderRadius: "14px",
-  color: "#e2e8f0",
-  boxShadow: "0 24px 48px rgba(2, 6, 23, 0.32)"
+  backgroundColor: "#ffffff",
+  border: "1px solid #e5e5e5",
+  borderRadius: "6px",
+  color: "#0a0a0a",
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)"
 };
 
 export function App() {
@@ -107,17 +107,17 @@ export function App() {
 
   const outcomeData = useMemo(
     () => [
-      { name: "Accepted", value: stats?.totals.accepted ?? 0, color: "#1fb86a" },
-      { name: "Rejected", value: stats?.totals.rejected ?? 0, color: "#f46d5e" },
-      { name: "Iterated", value: stats?.totals.iterated ?? 0, color: "#4f7cff" }
+      { name: "Accepted", value: stats?.totals.accepted ?? 0, color: "#16a34a" },
+      { name: "Rejected", value: stats?.totals.rejected ?? 0, color: "#dc2626" },
+      { name: "Iterated", value: stats?.totals.iterated ?? 0, color: "#2563eb" }
     ],
     [stats]
   );
   const windowOutcomeData = useMemo(
     () => [
-      { name: "Accepted", value: (stats?.timeSeries ?? []).reduce((sum, point) => sum + point.accepted, 0), color: "#1fb86a" },
-      { name: "Rejected", value: (stats?.timeSeries ?? []).reduce((sum, point) => sum + point.rejected, 0), color: "#f46d5e" },
-      { name: "Iterated", value: (stats?.timeSeries ?? []).reduce((sum, point) => sum + point.iterated, 0), color: "#4f7cff" }
+      { name: "Accepted", value: (stats?.timeSeries ?? []).reduce((sum, point) => sum + point.accepted, 0), color: "#16a34a" },
+      { name: "Rejected", value: (stats?.timeSeries ?? []).reduce((sum, point) => sum + point.rejected, 0), color: "#dc2626" },
+      { name: "Iterated", value: (stats?.timeSeries ?? []).reduce((sum, point) => sum + point.iterated, 0), color: "#2563eb" }
     ],
     [stats?.timeSeries]
   );
@@ -161,9 +161,9 @@ export function App() {
       <header className="topbar">
         <div className="topbar__inner">
           <div>
-            <p className="topbar__eyebrow">SignalCode Enterprise</p>
+            <p className="topbar__eyebrow">SignalCode Dashboard</p>
             <h1 className="topbar__title">Telemetry Command Center</h1>
-            <p className="topbar__subtitle">Enterprise-grade visibility into generation flow, acceptance quality, and post-accept rework.</p>
+            <p className="topbar__subtitle">Track generation quality, acceptance behavior, and post-accept rework from one place.</p>
           </div>
           <div className="topbar__actions">
             <div className="hero-chip-group">
@@ -177,12 +177,12 @@ export function App() {
       </header>
 
       <main className="app-main">
-        <section className="hero-banner">
+          <section className="hero-banner">
           <div className="hero-banner__content">
-            <p className="hero-banner__eyebrow">Operations Overview</p>
-            <h2 className="hero-banner__title">A cleaner control room for prompt delivery analytics</h2>
+            <p className="hero-banner__eyebrow">Overview</p>
+            <h2 className="hero-banner__title">Monitor delivery quality across the active analysis window</h2>
             <p className="hero-banner__copy">
-              Platform KPIs stay visible at a glance while the trend panels and activity feed follow the selected analysis window.
+              KPIs, trend panels, and recent activity stay aligned to the same time window so the data is easier to compare.
             </p>
             <div className="hero-banner__meta">
               <HeroStat label="Accepted" value={String(windowOutcomeData[0]?.value ?? 0)} accent="success" />
@@ -202,7 +202,7 @@ export function App() {
                 <div>
                   <p className="panel-heading__eyebrow">Distribution</p>
                   <h2 className="panel-heading__title">Overall outcome mix</h2>
-                  <p className="panel-heading__subtitle">Window totals only, with zero-value segments suppressed for readability.</p>
+                  <p className="panel-heading__subtitle">Window totals only, with zero-value segments hidden for readability.</p>
                 </div>
               </div>
               {pieData.length > 0 ? (

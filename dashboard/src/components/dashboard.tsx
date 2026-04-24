@@ -15,13 +15,13 @@ import { useMemo, useState, type ReactNode } from "react";
 import type { IdeMonitorEvent, PostAcceptTaskReworkRow, StatsRange, StatsResponse } from "../api";
 
 const CHART_GRID_STROKE = "rgba(148, 163, 184, 0.14)";
-const CHART_AXIS_STROKE = "#7d8aa5";
+const CHART_AXIS_STROKE = "#737373";
 const CHART_TOOLTIP_STYLE = {
-  backgroundColor: "#0f172a",
-  border: "1px solid rgba(148, 163, 184, 0.18)",
-  borderRadius: "14px",
-  color: "#e2e8f0",
-  boxShadow: "0 24px 48px rgba(2, 6, 23, 0.32)"
+  backgroundColor: "#ffffff",
+  border: "1px solid #e5e5e5",
+  borderRadius: "6px",
+  color: "#0a0a0a",
+  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.06)"
 };
 
 function formatPercent(value: number): string {
@@ -155,9 +155,9 @@ export function ChartPanel({
                     labelFormatter={(value) => new Date(value).toLocaleString()}
                     formatter={(value: number, name: string) => [value, toTitleCase(name)]}
                   />
-                  <Bar dataKey="accepted" name="Accepted" fill="#1fb86a" radius={[8, 8, 0, 0]} minPointSize={8} />
-                  <Bar dataKey="iterated" name="Iterated" fill="#4f7cff" radius={[8, 8, 0, 0]} minPointSize={8} />
-                  <Bar dataKey="rejected" name="Rejected" fill="#f46d5e" radius={[8, 8, 0, 0]} minPointSize={8} />
+                  <Bar dataKey="accepted" name="Accepted" fill="#16a34a" radius={[4, 4, 0, 0]} minPointSize={8} />
+                  <Bar dataKey="iterated" name="Iterated" fill="#2563eb" radius={[4, 4, 0, 0]} minPointSize={8} />
+                  <Bar dataKey="rejected" name="Rejected" fill="#dc2626" radius={[4, 4, 0, 0]} minPointSize={8} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -188,8 +188,8 @@ export function ChartPanel({
                 <AreaChart data={timeSeries}>
                   <defs>
                     <linearGradient id="momentumFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#4f7cff" stopOpacity={0.42} />
-                      <stop offset="100%" stopColor="#4f7cff" stopOpacity={0.02} />
+                      <stop offset="0%" stopColor="#2563eb" stopOpacity={0.18} />
+                      <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
@@ -214,10 +214,10 @@ export function ChartPanel({
                   <Area
                     type="monotone"
                     dataKey="acceptanceMomentum"
-                    stroke="#82a2ff"
-                    strokeWidth={2.5}
+                    stroke="#2563eb"
+                    strokeWidth={2}
                     fill="url(#momentumFill)"
-                    activeDot={{ r: 5, strokeWidth: 0, fill: "#b8c8ff" }}
+                    activeDot={{ r: 4, strokeWidth: 0, fill: "#2563eb" }}
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -294,11 +294,11 @@ export function ControlPanel(props: {
         <div>
           <p className="panel-heading__eyebrow">Command Panel</p>
           <h2 className="panel-heading__title">Filters and controls</h2>
-          <p className="panel-heading__subtitle">Tune the analytics window and refresh cadence without leaving the dashboard.</p>
+          <p className="panel-heading__subtitle">Adjust the analysis window, filters, and refresh cadence.</p>
         </div>
       </div>
 
-      <div className="space-y-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3">
+      <div className="space-y-3 border p-3" style={{ borderColor: "var(--border-default)", background: "var(--surface-elevated)" }}>
         <label className="control-row">
           <span>Auto Refresh</span>
           <select value={props.autoRefreshMs} onChange={(e) => props.onAutoRefreshChange(Number(e.target.value))} className="control-input">
@@ -321,7 +321,7 @@ export function ControlPanel(props: {
         </label>
       </div>
 
-      <div className="space-y-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3">
+      <div className="space-y-3 border p-3" style={{ borderColor: "var(--border-default)", background: "var(--surface-elevated)" }}>
         <label className="control-row">
           <span>Search</span>
           <input value={props.query} onChange={(e) => props.onQueryChange(e.target.value)} className="control-input" placeholder="Prompt or model..." />
@@ -349,7 +349,7 @@ export function ControlPanel(props: {
         <button className="btn-secondary" onClick={props.onExportChangeSnapshots} type="button" disabled={props.isExporting}>
           {props.isExporting ? "Exporting..." : "Export PR-style JSON"}
         </button>
-        <p className="text-[11px] text-slate-400">
+        <p className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
           Downloads a best-effort snapshot export derived from SignalCode task telemetry for downstream analytics pipelines.
         </p>
       </div>
@@ -459,12 +459,12 @@ export function PostAcceptReworkPanel({ rows }: { rows: PostAcceptTaskReworkRow[
             <>
               <div className="h-56">
                 <ResponsiveContainer>
-                  <LineChart data={chartData}>
+                    <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                     <XAxis dataKey="task" stroke={CHART_AXIS_STROKE} tick={{ fontSize: 11 }} />
                     <YAxis stroke={CHART_AXIS_STROKE} tick={{ fontSize: 11 }} />
                     <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-                    <Line type="monotone" dataKey="maxCharDelta" stroke="#82a2ff" strokeWidth={2.5} dot={{ r: 3, fill: "#82a2ff" }} />
+                    <Line type="monotone" dataKey="maxCharDelta" stroke="#2563eb" strokeWidth={2} dot={{ r: 3, fill: "#2563eb" }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>

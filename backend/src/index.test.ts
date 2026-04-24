@@ -125,6 +125,90 @@ describe("backend integrity behaviors", () => {
     assert.equal(response.body.model, "gemini-2.5-pro");
   });
 
+  it("returns structured create-file operations", async () => {
+    const app = createApp({
+      generateFn: async () =>
+        JSON.stringify({
+          kind: "create_file",
+          summary: "Create a helper file",
+          targetFilePath: "src/utils/new-helper.ts",
+          content: "export const newHelper = () => 42;\n"
+        })
+    });
+
+    const response = await request(app).post("/api/generate").send({
+      prompt: "create a helper file",
+      mode: "create_file",
+      context: {
+        filePath: "/tmp/file.ts",
+        targetFilePath: "src/utils/new-helper.ts",
+        selectionOrCaretSnippet: "",
+        languageId: "typescript"
+      }
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.operation.kind, "create_file");
+    assert.equal(response.body.operation.targetFilePath, "src/utils/new-helper.ts");
+    assert.match(response.body.operation.content, /newHelper/);
+  });
+
+  it("returns usage and cost metadata when available", async () => {
+    const app = createApp({
+      generateFn: async () => ({
+        content: JSON.stringify({
+          kind: "replace_range",
+          summary: "Update code",
+          targetFilePath: "/tmp/file.ts",
+          search: "const a = 1;",
+          replace: "const a = 2;"
+        }),
+        usage: {
+          promptTokens: 120,
+          completionTokens: 45,
+          totalTokens: 165,
+          costUsd: 0.00123
+        }
+      })
+    });
+
+    const response = await request(app).post("/api/generate").send({
+      prompt: "bump a",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.usage.promptTokens, 120);
+    assert.equal(response.body.usage.completionTokens, 45);
+    assert.equal(response.body.usage.totalTokens, 165);
+    assert.equal(response.body.usage.costUsd, 0.00123);
+  });
+
+  it("normalizes legacy search-replace output for insert mode", async () => {
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 1;\nconst b = 2;\n>>>>REPLACE"
+    });
+
+    const response = await request(app).post("/api/generate").send({
+      prompt: "add b right after a",
+      mode: "insert_into_file",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.operation.kind, "replace_range");
+    assert.equal(response.body.operation.search, "const a = 1;");
+    assert.match(response.body.operation.replace, /const b = 2;/);
+  });
+
   it("duplicate telemetry events are idempotent", async () => {
     const app = createApp({
       generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"

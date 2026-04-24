@@ -4,24 +4,23 @@
 
 @layer base {
   :root {
-    --app-bg: #07111f;
-    --app-bg-soft: #0b1627;
-    --surface-card: rgba(12, 23, 39, 0.88);
-    --surface-elevated: rgba(15, 29, 49, 0.96);
-    --surface-muted: rgba(255, 255, 255, 0.028);
-    --surface-hover: rgba(148, 163, 184, 0.09);
-    --border-default: rgba(148, 163, 184, 0.14);
-    --border-strong: rgba(148, 163, 184, 0.22);
-    --text-primary: #e5edf7;
-    --text-secondary: #a3b1c6;
-    --text-tertiary: #7d8aa5;
-    --interactive-primary: #4f7cff;
-    --interactive-primary-hover: #6a90ff;
-    --interactive-danger: #ef6a5d;
-    --success: #1fb86a;
-    --danger: #f46d5e;
-    --info: #4f7cff;
-    --shadow-strong: 0 24px 60px rgba(2, 6, 23, 0.32);
+    --surface-ground: #fafafa;
+    --surface-card: #ffffff;
+    --surface-elevated: #f5f5f5;
+    --surface-hover: rgba(0, 0, 0, 0.04);
+    --border-default: #e5e5e5;
+    --border-strong: #d4d4d4;
+    --border-subtle: #ededed;
+    --text-primary: #0a0a0a;
+    --text-secondary: #525252;
+    --text-tertiary: #737373;
+    --interactive-primary: #2563eb;
+    --interactive-primary-hover: #1d4ed8;
+    --success: #16a34a;
+    --danger: #dc2626;
+    --warning: #d97706;
+    --shadow-popover: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-modal: 0 4px 12px rgba(0, 0, 0, 0.08);
   }
 
   html,
@@ -32,27 +31,22 @@
 
   body {
     @apply m-0 antialiased;
-    background:
-      radial-gradient(circle at top left, rgba(79, 124, 255, 0.16), transparent 30%),
-      radial-gradient(circle at top right, rgba(31, 184, 106, 0.1), transparent 22%),
-      linear-gradient(180deg, #07111f 0%, #091321 42%, #0a1524 100%);
+    background: var(--surface-ground);
     color: var(--text-primary);
-    font-family: "Aptos", "Segoe UI Variable", "Segoe UI", "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
     line-height: 1.5;
   }
 
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    background-image:
-      linear-gradient(rgba(148, 163, 184, 0.045) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
-    background-size: 40px 40px;
-    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.28), transparent 78%);
-    opacity: 0.35;
+  * {
+    box-sizing: border-box;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
   }
 }
 
@@ -61,88 +55,88 @@
     @apply min-h-screen;
   }
 
-  .app-main {
-    @apply mx-auto w-full max-w-[1440px] px-4 pb-8 pt-5 sm:px-6 lg:px-8;
-  }
-
   .topbar {
     @apply sticky top-0 z-20 border-b;
     border-color: var(--border-default);
-    background: rgba(7, 17, 31, 0.82);
-    backdrop-filter: blur(18px);
+    background: var(--surface-card);
   }
 
   .topbar__inner {
-    @apply mx-auto flex w-full max-w-[1440px] flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8;
+    @apply mx-auto flex w-full max-w-[1280px] flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-start lg:justify-between lg:px-8;
   }
 
   .topbar__eyebrow,
   .section-heading__eyebrow,
   .panel-heading__eyebrow,
-  .hero-banner__eyebrow {
-    @apply text-[11px] font-semibold uppercase tracking-[0.22em];
-    color: #88a4ff;
+  .hero-banner__eyebrow,
+  .danger-card__eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-[0.16em];
+    color: var(--text-tertiary);
   }
 
   .topbar__title {
-    @apply mt-1 text-[28px] font-semibold tracking-tight;
+    @apply mt-1 text-[20px] font-semibold leading-[1.3];
     color: var(--text-primary);
   }
 
   .topbar__subtitle,
   .section-heading__subtitle,
   .panel-heading__subtitle,
-  .hero-banner__copy {
-    @apply mt-1 max-w-2xl text-[13px];
+  .hero-banner__copy,
+  .chart-header__subtitle,
+  .danger-card__copy {
+    @apply mt-1 text-[13px];
     color: var(--text-secondary);
   }
 
   .topbar__actions {
-    @apply flex flex-col items-end gap-3;
+    @apply flex w-full flex-col items-start gap-3 lg:w-auto lg:items-end;
   }
 
   .hero-chip-group,
   .summary-pill-group {
-    @apply flex flex-wrap items-center justify-end gap-2;
+    @apply flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end;
   }
 
   .info-chip,
   .summary-pill {
-    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px];
+    @apply inline-flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] font-medium;
     border-color: var(--border-default);
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-card);
     color: var(--text-secondary);
   }
 
   .info-chip strong,
   .summary-pill strong {
-    @apply font-semibold;
     color: var(--text-primary);
+    font-weight: 600;
   }
 
   .summary-pill--success strong {
-    color: #81efb0;
+    color: var(--success);
   }
 
   .summary-pill--info strong {
-    color: #b5c5ff;
+    color: var(--interactive-primary);
+  }
+
+  .app-main {
+    @apply mx-auto w-full max-w-[1280px] px-4 pb-8 pt-6 sm:px-6 lg:px-8;
   }
 
   .hero-banner {
-    @apply mb-4 rounded-[28px] border px-5 py-5 sm:px-6;
-    border-color: rgba(129, 140, 248, 0.16);
-    background:
-      linear-gradient(135deg, rgba(79, 124, 255, 0.16), transparent 48%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012));
-    box-shadow: var(--shadow-strong);
+    @apply mb-4 rounded-md border;
+    border-color: var(--border-default);
+    background: var(--surface-card);
   }
 
   .hero-banner__content {
-    @apply flex flex-col gap-4;
+    @apply flex flex-col gap-4 p-4 sm:p-6;
   }
 
   .hero-banner__title {
-    @apply mt-2 text-[24px] font-semibold tracking-tight;
+    @apply mt-1 text-[18px] font-semibold leading-[1.35];
+    color: var(--text-primary);
   }
 
   .hero-banner__meta {
@@ -150,89 +144,71 @@
   }
 
   .hero-stat {
-    @apply rounded-2xl border px-4 py-3;
+    @apply rounded-md border px-4 py-3;
     border-color: var(--border-default);
-    background: rgba(4, 12, 24, 0.3);
+    background: var(--surface-elevated);
   }
 
   .hero-stat span {
-    @apply text-[11px] uppercase tracking-[0.18em];
+    @apply text-[11px] font-medium uppercase tracking-[0.14em];
     color: var(--text-tertiary);
   }
 
   .hero-stat strong {
-    @apply mt-2 block text-2xl font-semibold;
+    @apply mt-1 block text-[20px] font-semibold;
     color: var(--text-primary);
   }
 
-  .hero-stat--success {
-    box-shadow: inset 0 1px 0 rgba(31, 184, 106, 0.18);
-  }
-
   .hero-stat--success strong {
-    color: #8ef0ba;
-  }
-
-  .hero-stat--danger {
-    box-shadow: inset 0 1px 0 rgba(244, 109, 94, 0.18);
+    color: var(--success);
   }
 
   .hero-stat--danger strong {
-    color: #ffb2a8;
-  }
-
-  .hero-stat--info {
-    box-shadow: inset 0 1px 0 rgba(79, 124, 255, 0.18);
+    color: var(--danger);
   }
 
   .hero-stat--info strong {
-    color: #bfd0ff;
+    color: var(--interactive-primary);
   }
 
   .dashboard-grid {
-    @apply grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px];
+    @apply grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px];
   }
 
   .dashboard-aside {
-    @apply space-y-4 lg:sticky lg:top-[104px] lg:h-fit;
+    @apply space-y-4;
   }
 
-  .card {
-    @apply rounded-[24px] border p-4 sm:p-5;
+  .card,
+  .metric-card {
+    @apply rounded-md border p-4 sm:p-4;
     border-color: var(--border-default);
     background: var(--surface-card);
   }
 
-  .card--elevated {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.012)),
-      var(--surface-elevated);
-    box-shadow: var(--shadow-strong);
+  .card--elevated,
+  .metric-card {
+    box-shadow: none;
   }
 
   .section-heading,
   .panel-heading,
   .chart-header {
-    @apply mb-4 flex flex-wrap items-start justify-between gap-3;
+    @apply mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between;
   }
 
   .section-heading__title,
   .panel-heading__title,
   .chart-header__title {
-    @apply mt-1 text-lg font-semibold tracking-tight;
+    @apply mt-1 text-[14px] font-semibold leading-[1.4];
     color: var(--text-primary);
   }
 
-  .chart-header__subtitle {
-    @apply mt-1 max-w-xl text-[13px];
-    color: var(--text-secondary);
-  }
-
   .soft-badge {
-    @apply inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em];
-    border-color: rgba(130, 162, 255, 0.24);
-    background: rgba(79, 124, 255, 0.11);
-    color: #c1d0ff;
+    @apply inline-flex items-center self-start rounded-md border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em] sm:self-auto;
+    border-color: #dbe4ff;
+    background: #eff6ff;
+    color: var(--interactive-primary);
   }
 
   .metric-grid {
@@ -240,47 +216,37 @@
   }
 
   .metric-card {
-    @apply relative overflow-hidden rounded-[24px] border p-4;
-    border-color: var(--border-default);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.012)),
-      var(--surface-elevated);
-    box-shadow: var(--shadow-strong);
+    @apply relative overflow-hidden;
   }
 
   .metric-card__accent {
-    position: absolute;
-    inset: 0 auto auto 0;
-    height: 3px;
-    width: 100%;
-    background: linear-gradient(90deg, rgba(31, 184, 106, 0.9), rgba(79, 124, 255, 0.7), transparent);
-    opacity: 0.9;
+    display: none;
   }
 
   .metric-card__label {
-    @apply text-[11px] font-semibold uppercase tracking-[0.18em];
-    color: var(--text-secondary);
+    @apply text-[11px] font-medium uppercase tracking-[0.14em];
+    color: var(--text-tertiary);
   }
 
   .metric-card__value {
-    @apply mt-3 text-[32px] font-semibold leading-none tracking-tight;
+    @apply mt-3 text-[28px] font-semibold leading-none;
     color: var(--text-primary);
   }
 
   .metric-card__helper {
     @apply mt-2 text-[12px];
-    color: var(--text-tertiary);
+    color: var(--text-secondary);
   }
 
   .control-row {
-    @apply flex flex-col gap-1.5 text-xs;
+    @apply flex flex-col gap-1.5 text-[12px];
     color: var(--text-secondary);
   }
 
   .control-input {
-    @apply min-h-10 rounded-xl border px-3 text-[13px] outline-none transition;
-    border-color: rgba(148, 163, 184, 0.16);
-    background: rgba(4, 12, 24, 0.38);
+    @apply min-h-8 rounded-md border px-3 text-[13px] outline-none transition;
+    border-color: var(--border-default);
+    background: var(--surface-card);
     color: var(--text-primary);
   }
 
@@ -289,105 +255,95 @@
   }
 
   .control-input:focus-visible {
-    border-color: rgba(79, 124, 255, 0.5);
-    box-shadow: 0 0 0 4px rgba(79, 124, 255, 0.16);
+    border-color: var(--interactive-primary);
+    outline: 2px solid rgba(37, 99, 235, 0.18);
+    outline-offset: 1px;
+    box-shadow: none;
   }
 
   .btn-primary,
   .btn-secondary,
   .btn-danger {
-    @apply inline-flex min-h-10 items-center justify-center rounded-xl px-4 text-[13px] font-semibold transition;
+    @apply inline-flex min-h-8 items-center justify-center rounded-md px-3 text-[13px] font-medium transition;
   }
 
   .btn-primary {
-    background: linear-gradient(135deg, #4f7cff, #3764ec);
-    color: white;
-    box-shadow: 0 14px 28px rgba(79, 124, 255, 0.22);
+    border: 1px solid var(--interactive-primary);
+    background: var(--interactive-primary);
+    color: #ffffff;
   }
 
   .btn-primary:hover {
-    background: linear-gradient(135deg, #6a90ff, #4671f0);
+    background: var(--interactive-primary-hover);
+    border-color: var(--interactive-primary-hover);
   }
 
   .btn-secondary {
-    border: 1px solid rgba(148, 163, 184, 0.18);
-    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--border-default);
+    background: var(--surface-card);
     color: var(--text-primary);
   }
 
   .btn-secondary:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--surface-elevated);
   }
 
   .btn-danger {
-    border: 1px solid rgba(244, 109, 94, 0.28);
-    background: rgba(244, 109, 94, 0.08);
-    color: #ffb4aa;
+    border: 1px solid #fecaca;
+    background: #ffffff;
+    color: var(--danger);
   }
 
   .btn-danger:hover {
-    background: rgba(244, 109, 94, 0.12);
+    background: #fef2f2;
   }
 
   .btn-primary:disabled,
   .btn-secondary:disabled,
   .btn-danger:disabled {
     cursor: not-allowed;
-    opacity: 0.65;
+    opacity: 0.55;
   }
 
   .danger-card {
-    @apply flex flex-col gap-3 rounded-2xl border p-4;
-    border-color: rgba(244, 109, 94, 0.18);
-    background: linear-gradient(180deg, rgba(244, 109, 94, 0.08), rgba(244, 109, 94, 0.03));
-  }
-
-  .danger-card__eyebrow {
-    @apply text-[11px] font-semibold uppercase tracking-[0.18em];
-    color: #ffb2a8;
-  }
-
-  .danger-card__copy {
-    @apply mt-1 text-[13px];
-    color: #f6c2bb;
+    @apply flex flex-col gap-3 rounded-md border p-4;
+    border-color: #fecaca;
+    background: #fffafa;
   }
 
   .status-chip {
-    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em];
+    @apply inline-flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em];
   }
 
   .status-chip__dot {
-    @apply h-2.5 w-2.5 shrink-0 rounded-full;
-    background: rgba(226, 232, 240, 0.9);
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+    @apply h-1.5 w-1.5 shrink-0 rounded-full;
+    background: #a3a3a3;
   }
 
   .status-chip--success {
-    border-color: rgba(31, 184, 106, 0.22);
-    background: rgba(31, 184, 106, 0.09);
-    color: #8ef0ba;
+    border-color: #d1fae5;
+    background: #f0fdf4;
+    color: var(--success);
   }
 
   .status-chip--success .status-chip__dot {
-    background: #1fb86a;
-    box-shadow: 0 0 0 4px rgba(31, 184, 106, 0.14);
+    background: var(--success);
   }
 
   .status-chip--danger {
-    border-color: rgba(244, 109, 94, 0.22);
-    background: rgba(244, 109, 94, 0.08);
-    color: #ffb4aa;
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: var(--danger);
   }
 
   .status-chip--danger .status-chip__dot {
-    background: #f46d5e;
-    box-shadow: 0 0 0 4px rgba(244, 109, 94, 0.14);
+    background: var(--danger);
   }
 
   .table-shell {
-    @apply overflow-x-auto rounded-2xl border;
-    border-color: rgba(148, 163, 184, 0.12);
-    background: rgba(4, 12, 24, 0.26);
+    @apply overflow-x-auto rounded-md border;
+    border-color: var(--border-default);
+    background: var(--surface-card);
   }
 
   .data-table {
@@ -395,12 +351,12 @@
   }
 
   .data-table thead {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-elevated);
   }
 
   .data-table th {
-    @apply px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em];
-    color: var(--text-secondary);
+    @apply px-3 py-3 text-left text-[11px] font-medium uppercase tracking-[0.14em];
+    color: var(--text-tertiary);
   }
 
   .data-table td {
@@ -409,41 +365,41 @@
   }
 
   .data-table tbody tr {
-    border-top: 1px solid rgba(148, 163, 184, 0.08);
+    border-top: 1px solid var(--border-subtle);
   }
 
   .data-table tbody tr:hover {
-    background: rgba(255, 255, 255, 0.028);
+    background: var(--surface-hover);
   }
 
   .outcome-pill {
-    @apply inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em];
+    @apply inline-flex rounded-md px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em];
   }
 
   .outcome-pill--success {
-    background: rgba(31, 184, 106, 0.11);
-    color: #8ef0ba;
+    background: #f0fdf4;
+    color: var(--success);
   }
 
   .outcome-pill--danger {
-    background: rgba(244, 109, 94, 0.1);
-    color: #ffb4aa;
+    background: #fef2f2;
+    color: var(--danger);
   }
 
   .outcome-pill--info {
-    background: rgba(79, 124, 255, 0.12);
-    color: #bfd0ff;
+    background: #eff6ff;
+    color: var(--interactive-primary);
   }
 
   .outcome-pill--neutral {
-    background: rgba(148, 163, 184, 0.12);
-    color: #d5deec;
+    background: #f5f5f5;
+    color: var(--text-secondary);
   }
 
   .event-card {
-    @apply rounded-2xl border p-3;
-    border-color: rgba(148, 163, 184, 0.12);
-    background: rgba(4, 12, 24, 0.32);
+    @apply rounded-md border p-3;
+    border-color: var(--border-default);
+    background: var(--surface-card);
   }
 
   .event-card__timestamp {
@@ -452,24 +408,25 @@
   }
 
   .event-card__title {
-    @apply mt-1 font-semibold;
+    @apply mt-1 font-medium;
     color: var(--text-primary);
   }
 
   .event-card__path {
-    @apply mt-1 truncate font-mono text-[12px];
-    color: #bfd0ff;
+    @apply mt-1 truncate text-[12px];
+    color: var(--text-secondary);
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
   }
 
   .event-card__meta {
     @apply mt-1 text-[11px];
-    color: var(--text-secondary);
+    color: var(--text-tertiary);
   }
 
   .empty-state {
-    @apply mt-2 flex min-h-48 flex-col items-center justify-center rounded-2xl border px-4 py-6 text-center;
-    border-color: rgba(148, 163, 184, 0.12);
-    background: rgba(4, 12, 24, 0.28);
+    @apply mt-2 flex min-h-40 flex-col items-center justify-center rounded-md border px-4 py-6 text-center;
+    border-color: var(--border-default);
+    background: var(--surface-elevated);
   }
 
   .empty-state--compact {
@@ -477,18 +434,23 @@
   }
 
   .empty-state__title {
-    @apply mt-3 text-[13px] font-semibold;
+    @apply mt-3 text-[13px] font-medium;
     color: var(--text-primary);
   }
 
   .empty-state__subtitle {
-    @apply mt-2 text-[12px];
+    @apply mt-2 max-w-[28rem] text-[12px];
     color: var(--text-secondary);
   }
 
   .metric-row {
     @apply flex items-start justify-between gap-4 border-b pb-2;
-    border-color: rgba(148, 163, 184, 0.08);
+    border-color: var(--border-subtle);
+  }
+
+  .metric-row:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
   }
 
   .metric-row__label {
@@ -496,26 +458,26 @@
   }
 
   .metric-row__value {
-    @apply max-w-[65%] break-all text-right font-mono text-[12px];
+    @apply max-w-[65%] break-all text-right text-[12px];
     color: var(--text-primary);
-    font-family: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
   }
 
   .error-banner {
-    @apply rounded-2xl border px-4 py-3 text-[13px];
-    border-color: rgba(244, 109, 94, 0.24);
-    background: rgba(244, 109, 94, 0.1);
-    color: #ffd2cb;
+    @apply rounded-md border px-4 py-3 text-[13px];
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #991b1b;
   }
 
   .distribution-legend {
-    @apply flex flex-col justify-center gap-3;
+    @apply flex flex-col justify-center gap-2;
   }
 
   .distribution-legend__row {
-    @apply flex items-center justify-between rounded-2xl border px-4 py-3;
-    border-color: rgba(148, 163, 184, 0.12);
-    background: rgba(4, 12, 24, 0.28);
+    @apply flex items-center justify-between rounded-md border px-3 py-3;
+    border-color: var(--border-default);
+    background: var(--surface-card);
   }
 
   .distribution-legend__label {
@@ -524,11 +486,11 @@
   }
 
   .distribution-legend__dot {
-    @apply h-2.5 w-2.5 rounded-full;
+    @apply h-2 w-2 rounded-full;
   }
 
   .distribution-legend__values {
-    @apply flex items-center gap-3 text-sm;
+    @apply flex items-center gap-3 text-[12px];
   }
 
   .distribution-legend__values strong {
@@ -537,5 +499,40 @@
 
   .distribution-legend__values span {
     color: var(--text-tertiary);
+  }
+
+  @media (max-width: 1279px) {
+    .dashboard-aside {
+      position: static;
+    }
+  }
+
+  @media (max-width: 639px) {
+    .app-main {
+      @apply px-3 pb-6 pt-4;
+    }
+
+    .topbar__inner {
+      @apply px-3 py-3;
+    }
+
+    .topbar__actions {
+      @apply items-start;
+    }
+
+    .hero-chip-group,
+    .summary-pill-group {
+      @apply justify-start;
+    }
+
+    .metric-grid,
+    .hero-banner__meta {
+      grid-template-columns: 1fr;
+    }
+
+    .data-table th,
+    .data-table td {
+      @apply px-2.5 py-2.5;
+    }
   }
 }
