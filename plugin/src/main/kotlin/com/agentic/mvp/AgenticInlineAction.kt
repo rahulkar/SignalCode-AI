@@ -160,9 +160,26 @@ class SignalCodeInlineAction : AnAction() {
             val models = runCatching { withContext(Dispatchers.IO) { backendClient.fetchModels() } }.getOrNull() ?: return@launch
             ApplicationManager.getApplication().invokeLater {
                 val currentSelection = (modelCombo.selectedItem as? String) ?: promptHistoryService.selectedModel(DEFAULT_MODEL)
-                val visibleModels = models.supportedModels
+                val liveModels = models.availableModels
+                    ?.filter { models.supportedModels.contains(it) }
+                    ?.distinct()
+                    .orEmpty()
+                val visibleModels = when {
+                    liveModels.isNotEmpty() -> liveModels
+                    models.supportedModels.isNotEmpty() -> models.supportedModels
+                    else -> FALLBACK_MODELS
+                }
                 modelCombo.removeAllItems()
                 visibleModels.forEach { modelCombo.addItem(it) }
+                val hasLiveAvailability = models.availableModels != null
+                val noLiveModels = hasLiveAvailability && liveModels.isEmpty()
+                modelCombo.isEnabled = visibleModels.isNotEmpty() && !noLiveModels
+                submitButton.isEnabled = !noLiveModels
+                helperLabel.text = when {
+                    noLiveModels -> "No live models available right now"
+                    hasLiveAvailability -> "Ctrl/Cmd+Enter to generate, using live model list"
+                    else -> "Ctrl/Cmd+Enter to generate, Esc to close"
+                }
                 val preferred = when {
                     visibleModels.contains(currentSelection) -> currentSelection
                     visibleModels.contains(models.defaultModel) -> models.defaultModel
@@ -176,6 +193,10 @@ class SignalCodeInlineAction : AnAction() {
         val submitAction = submit@{
             val prompt = promptField.text.trim()
             if (prompt.isEmpty()) {
+                return@submit
+            }
+            if (modelCombo.itemCount == 0 || !modelCombo.isEnabled) {
+                notify(project, "No live models are currently available.", NotificationType.WARNING)
                 return@submit
             }
             val selectedModel = (modelCombo.selectedItem as? String)?.trim().orEmpty().ifEmpty { DEFAULT_MODEL }
@@ -286,6 +307,9 @@ class SignalCodeInlineAction : AnAction() {
                             )
                         )
                     )
+                }
+                if (response.model != model) {
+                    notify(project, "Selected model '$model' was unavailable. Used '${response.model}' instead.", NotificationType.INFORMATION)
                 }
                 val parsed = DiffParser.parse(response.raw)
                 if (parsed == null) {

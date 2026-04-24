@@ -76,6 +76,55 @@ describe("backend integrity behaviors", () => {
     assert.ok(Array.isArray(response.body.supportedModels));
   });
 
+  it("falls back to another live configured model when a selected alias becomes unavailable", async () => {
+    const app = createApp({
+      generateFn: async ({ model }) => {
+        if (model === "gemini-2.5-pro") {
+          throw new Error("Invalid model name passed in model=gemini-2.5-pro");
+        }
+        return "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE";
+      },
+      listModelsFn: async () => ["gemini-flash"]
+    });
+
+    const response = await request(app).post("/api/generate").send({
+      prompt: "bump a",
+      model: "gemini-2.5-pro",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.model, "gemini-flash");
+  });
+
+  it("falls back from a stale default model to the first live configured model", async () => {
+    const app = createApp({
+      generateFn: async ({ model }) => {
+        if (model === "gemini-flash") {
+          throw new Error("Invalid model name passed in model=gemini-flash");
+        }
+        return "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE";
+      },
+      listModelsFn: async () => ["gemini-2.5-pro"]
+    });
+
+    const response = await request(app).post("/api/generate").send({
+      prompt: "bump a",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.model, "gemini-2.5-pro");
+  });
+
   it("duplicate telemetry events are idempotent", async () => {
     const app = createApp({
       generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"

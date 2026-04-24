@@ -19,17 +19,18 @@ import type {
 
 const port = Number(process.env.PORT ?? 3001);
 const configuredModel = process.env.LITELLM_MODEL;
-const defaultModel =
-  configuredModel &&
-  supportedModels.includes(configuredModel as (typeof supportedModels)[number])
-    ? configuredModel
-    : generatedDefaultModel;
+const defaultModel: SupportedModel = configuredModel && isSupportedModel(configuredModel) ? configuredModel : generatedDefaultModel;
 const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
 
 initializeDb();
 
 type GenerateFn = typeof generateSearchReplace;
 type ListModelsFn = typeof fetchAvailableModelIds;
+type SupportedModel = (typeof supportedModels)[number];
+
+function isSupportedModel(model: string): model is SupportedModel {
+  return supportedModels.includes(model as SupportedModel);
+}
 
 export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListModelsFn }) {
   const app = express();
@@ -77,7 +78,7 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
 
   const { prompt, context } = parsed.data;
   const requestedModel = parsed.data.model?.trim() || defaultModel;
-  if (!supportedModels.includes(requestedModel as (typeof supportedModels)[number])) {
+  if (!isSupportedModel(requestedModel)) {
     return res.status(400).json({
       error: "Unsupported model",
       message: `Model '${requestedModel}' is not supported`,
@@ -90,7 +91,7 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   const promptSnippet = prompt.slice(0, 120);
 
   try {
-    let effectiveModel = requestedModel;
+    let effectiveModel: SupportedModel = requestedModel;
     let raw: string;
     try {
       raw = await generateFn({
@@ -103,15 +104,18 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
     } catch (primaryError) {
       const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
       const shouldFallback =
-        effectiveModel !== defaultModel &&
-        (primaryMessage.includes("Invalid model name passed") ||
-          primaryMessage.includes("invalid model name"));
+        primaryMessage.includes("Invalid model name passed") || primaryMessage.includes("invalid model name");
       if (!shouldFallback) {
         throw primaryError;
       }
 
-      // Retry once with configured default model for keys lacking the selected model.
-      effectiveModel = defaultModel;
+      const fallbackModel = await resolveFallbackModel(listModelsFn, effectiveModel);
+      if (!fallbackModel || fallbackModel === effectiveModel) {
+        throw primaryError;
+      }
+
+      // Retry once with another configured model that is currently live on the proxy.
+      effectiveModel = fallbackModel;
       raw = await generateFn({
         prompt,
         model: effectiveModel,
@@ -560,6 +564,25 @@ function isTimestampFresh(timestamp: string | null, ttlMs: number): boolean {
   const millis = new Date(timestamp).getTime();
   if (Number.isNaN(millis)) return false;
   return Date.now() - millis <= ttlMs;
+}
+
+async function resolveFallbackModel(
+  listModelsFn: ListModelsFn,
+  requestedModel: SupportedModel
+): Promise<SupportedModel | null> {
+  try {
+    const liveModelIds = await listModelsFn();
+    const availableConfiguredModels = supportedModels.filter((model) => liveModelIds.includes(model));
+    if (availableConfiguredModels.length === 0) {
+      return requestedModel === defaultModel ? null : defaultModel;
+    }
+    if (availableConfiguredModels.includes(defaultModel)) {
+      return defaultModel;
+    }
+    return availableConfiguredModels[0] ?? null;
+  } catch {
+    return requestedModel === defaultModel ? null : defaultModel;
+  }
 }
 
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
