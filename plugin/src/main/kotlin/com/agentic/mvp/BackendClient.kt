@@ -49,6 +49,24 @@ class BackendClient(
         }
     }
 
+    fun fetchModels(): ModelsResponse {
+        try {
+            val httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create("$baseUrl/api/models"))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build()
+            val response = client.send(httpRequest, HttpResponse.BodyHandlers.ofString())
+            if (response.statusCode() !in 200..299) {
+                val detail = extractError(response.body())
+                throw IllegalStateException("HTTP ${response.statusCode()} from backend: $detail")
+            }
+            return gson.fromJson(response.body(), ModelsResponse::class.java)
+        } catch (error: Exception) {
+            throw IllegalStateException("Failed to call $baseUrl/api/models: ${rootCauseMessage(error)}", error)
+        }
+    }
+
     fun extractError(body: String): String = runCatching {
         val obj = gson.fromJson(body, JsonObject::class.java)
         val message = obj.get("message")?.takeIf { !it.isJsonNull }?.asString

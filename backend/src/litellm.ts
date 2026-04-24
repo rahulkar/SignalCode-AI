@@ -19,6 +19,15 @@ interface LiteLlmResponse {
   }>;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function jitter(baseMs: number): number {
+  const delta = Math.floor(baseMs * 0.2);
+  return baseMs + Math.floor(Math.random() * (delta * 2 + 1)) - delta;
+}
+
 function stripOuterMarkdownFences(raw: string): string {
   let t = raw.replace(/\r\n/g, "\n").trim();
   for (let i = 0; i < 3; i++) {
@@ -124,56 +133,75 @@ export async function generateSearchReplace(params: {
   filePath: string;
   selectionOrCaretSnippet: string;
   languageId?: string;
+  model?: string;
 }): Promise<string> {
   const baseUrl = process.env.LITELLM_BASE_URL ?? "http://localhost:4000";
-  const model = process.env.LITELLM_MODEL ?? "gemini-flash";
+  const model = params.model ?? process.env.LITELLM_MODEL ?? "gemini-flash";
   const apiKey = process.env.LITELLM_API_KEY;
 
   const url = `${baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.1,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: `File: ${params.filePath}
+  const payload = JSON.stringify({
+    model,
+    temperature: 0.1,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: `File: ${params.filePath}
 Language: ${params.languageId ?? "unknown"}
 Selected snippet:
 ${params.selectionOrCaretSnippet}
 
 Instruction:
 ${params.prompt}`
-          }
-        ]
-      }),
-      signal: AbortSignal.timeout(120_000)
-    });
-  } catch (e) {
-    const name = e instanceof Error ? e.name : "";
-    const msg = e instanceof Error ? e.message : String(e);
-    const hint =
-      name === "AbortError" || msg.includes("timeout")
-        ? " (timed out after 120s)"
-        : "";
-    throw new Error(
-      `Cannot reach LiteLLM at ${baseUrl}${hint}: ${msg}. ` +
-        `If the proxy runs in Docker, ensure it is up (e.g. docker compose up litellm) and ` +
-        `when the backend runs on the host set LITELLM_BASE_URL=http://localhost:4000.`
-    );
+      }
+    ]
+  });
+
+  let response: Response | null = null;
+  let lastErrorBody = "";
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+        },
+        body: payload,
+        signal: AbortSignal.timeout(120_000)
+      });
+    } catch (e) {
+      const name = e instanceof Error ? e.name : "";
+      const msg = e instanceof Error ? e.message : String(e);
+      const hint =
+        name === "AbortError" || msg.includes("timeout")
+          ? " (timed out after 120s)"
+          : "";
+      throw new Error(
+        `Cannot reach LiteLLM at ${baseUrl}${hint}: ${msg}. ` +
+          `If the proxy runs in Docker, ensure it is up (e.g. docker compose up litellm) and ` +
+          `when the backend runs on the host set LITELLM_BASE_URL=http://localhost:4000.`
+      );
+    }
+
+    if (response.ok) {
+      break;
+    }
+
+    lastErrorBody = await response.text();
+    const isRateLimited = response.status === 429 || lastErrorBody.includes("\"code\":\"429\"");
+    if (!isRateLimited || attempt === maxAttempts) {
+      break;
+    }
+    await sleep(jitter(500 * attempt));
   }
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`LiteLLM request failed: ${response.status} ${body}`);
+  if (!response || !response.ok) {
+    const status = response?.status ?? 0;
+    const body = lastErrorBody || (response ? await response.text() : "");
+    throw new Error(`LiteLLM request failed: ${status} ${body}`);
   }
 
   const data = (await response.json()) as LiteLlmResponse;

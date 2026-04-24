@@ -9,7 +9,8 @@ import com.intellij.openapi.components.Storage
 @State(name = "SignalCodePromptHistory", storages = [Storage("signalcode-ai.xml")])
 class PromptHistoryService : PersistentStateComponent<PromptHistoryService.State> {
     data class State(
-        var prompts: MutableList<String> = mutableListOf()
+        var prompts: MutableList<String> = mutableListOf(),
+        var selectedModel: String? = null
     )
 
     private var state = State()
@@ -36,5 +37,11 @@ class PromptHistoryService : PersistentStateComponent<PromptHistoryService.State
 
     fun clear() {
         state.prompts.clear()
+    }
+
+    fun selectedModel(defaultModel: String): String = state.selectedModel ?: defaultModel
+
+    fun setSelectedModel(model: String) {
+        state.selectedModel = model
     }
 }

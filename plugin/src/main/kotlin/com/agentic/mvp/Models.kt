@@ -9,6 +9,7 @@ enum class TelemetryEventType {
 
 data class GenerateRequest(
     val prompt: String,
+    val model: String?,
     val context: GenerateContext
 )
 
@@ -34,4 +35,9 @@ data class TelemetryRequest(
 data class SearchReplaceDiff(
     val search: String,
     val replace: String
+)
+
+data class ModelsResponse(
+    val defaultModel: String,
+    val supportedModels: List<String>
 )

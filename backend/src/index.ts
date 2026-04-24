@@ -4,11 +4,17 @@ import cors from "cors";
 import express from "express";
 import { db, initializeDb } from "./db.js";
 import { generateSearchReplace } from "./litellm.js";
+import { defaultModel as generatedDefaultModel, supportedModels } from "./modelCatalog.generated.js";
 import { generateRequestSchema, telemetryRequestSchema } from "./schemas.js";
 import type { GenerateResponse, RecentActivityRow, StatsResponse, TelemetryRequest } from "./types.js";
 
 const port = Number(process.env.PORT ?? 3001);
-const model = process.env.LITELLM_MODEL ?? "gemini-flash";
+const configuredModel = process.env.LITELLM_MODEL;
+const defaultModel =
+  configuredModel &&
+  supportedModels.includes(configuredModel as (typeof supportedModels)[number])
+    ? configuredModel
+    : generatedDefaultModel;
 const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
 
 initializeDb();
@@ -26,6 +32,13 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
     res.json({ ok: true });
   });
 
+  app.get("/api/models", (_req, res) => {
+    res.json({
+      defaultModel,
+      supportedModels: [...supportedModels]
+    });
+  });
+
   app.post("/api/generate", async (req, res) => {
   const parsed = generateRequestSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -33,6 +46,14 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
   }
 
   const { prompt, context } = parsed.data;
+  const requestedModel = parsed.data.model?.trim() || defaultModel;
+  if (!supportedModels.includes(requestedModel as (typeof supportedModels)[number])) {
+    return res.status(400).json({
+      error: "Unsupported model",
+      message: `Model '${requestedModel}' is not supported`,
+      supportedModels
+    });
+  }
   const taskId = crypto.randomUUID();
   const diffId = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -41,6 +62,7 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
   try {
     const raw = await generateFn({
       prompt,
+      model: requestedModel,
       filePath: context.filePath,
       selectionOrCaretSnippet: context.selectionOrCaretSnippet,
       languageId: context.languageId
@@ -48,13 +70,13 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
     db.prepare(
       `INSERT INTO tasks (task_id, prompt_snippet, model, status, created_at)
        VALUES (?, ?, ?, 'SUCCEEDED', ?)`
-    ).run(taskId, promptSnippet, model, now);
+    ).run(taskId, promptSnippet, requestedModel, now);
 
     const response: GenerateResponse = {
       task_id: taskId,
       diff_id: diffId,
       raw,
-      model
+      model: requestedModel
     };
     return res.json(response);
   } catch (error) {
@@ -62,7 +84,7 @@ export function createApp(deps?: { generateFn?: GenerateFn }) {
     db.prepare(
       `INSERT OR IGNORE INTO tasks (task_id, prompt_snippet, model, status, created_at)
        VALUES (?, ?, ?, 'FAILED', ?)`
-    ).run(taskId, promptSnippet, model, now);
+    ).run(taskId, promptSnippet, requestedModel, now);
     // eslint-disable-next-line no-console
     console.error("[/api/generate]", message);
     return res.status(502).json({

@@ -41,7 +41,6 @@ class SignalCodeInlineAction : AnAction() {
     private val requestVersionTracker = RequestVersionTracker()
     private var activeDiff: ActiveDiff? = null
     private var generateJob: Job? = null
-    private val modelName = "gemini-flash"
     private val promptHistoryService: PromptHistoryService
         get() = service()
 
@@ -73,6 +72,11 @@ class SignalCodeInlineAction : AnAction() {
         val clearHistoryButton = JButton("Clear History").apply {
             isEnabled = historyModel.size > 0
         }
+        val modelCombo = JComboBox(FALLBACK_MODELS.toTypedArray()).apply {
+            preferredSize = Dimension(190, 28)
+            selectedItem = promptHistoryService.selectedModel(DEFAULT_MODEL)
+            toolTipText = "Model used for this generation request"
+        }
         val presetRefactorButton = JButton("Refactor")
         val presetExplainButton = JButton("Explain")
         val presetOptimizeButton = JButton("Optimize")
@@ -90,7 +94,14 @@ class SignalCodeInlineAction : AnAction() {
 
         val topRow = JPanel(BorderLayout()).apply {
             add(titleLabel, BorderLayout.WEST)
-            add(contextLabel, BorderLayout.EAST)
+            add(
+                JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
+                    add(JLabel("Model:"))
+                    add(modelCombo)
+                    add(contextLabel)
+                },
+                BorderLayout.EAST
+            )
         }
         val presetRow = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
             add(JLabel("Presets:"))
@@ -113,9 +124,7 @@ class SignalCodeInlineAction : AnAction() {
             add(clearButton)
             add(submitButton)
         }
-        val targetLabel = JLabel(
-            "Target: ${File(psiFile.virtualFile.path).name}  |  Model: $modelName"
-        ).apply {
+        val targetLabel = JLabel("Target: ${File(psiFile.virtualFile.path).name}").apply {
             foreground = Color(115, 115, 115)
         }
         val panel = JPanel(BorderLayout(0, 8)).apply {
@@ -147,16 +156,42 @@ class SignalCodeInlineAction : AnAction() {
         popup.showInBestPositionFor(editor)
         promptField.requestFocusInWindow()
 
+        scope.launch {
+            val models = runCatching { withContext(Dispatchers.IO) { backendClient.fetchModels() } }.getOrNull() ?: return@launch
+            ApplicationManager.getApplication().invokeLater {
+                val currentSelection = (modelCombo.selectedItem as? String) ?: promptHistoryService.selectedModel(DEFAULT_MODEL)
+                modelCombo.removeAllItems()
+                models.supportedModels.forEach { modelCombo.addItem(it) }
+                val preferred = when {
+                    models.supportedModels.contains(currentSelection) -> currentSelection
+                    models.supportedModels.contains(models.defaultModel) -> models.defaultModel
+                    models.supportedModels.isNotEmpty() -> models.supportedModels.first()
+                    else -> DEFAULT_MODEL
+                }
+                modelCombo.selectedItem = preferred
+            }
+        }
+
         val submitAction = submit@{
             val prompt = promptField.text.trim()
             if (prompt.isEmpty()) {
                 return@submit
             }
+            val selectedModel = (modelCombo.selectedItem as? String)?.trim().orEmpty().ifEmpty { DEFAULT_MODEL }
+            promptHistoryService.setSelectedModel(selectedModel)
             submitButton.isEnabled = false
             submitButton.text = "Generating..."
             popup.cancel()
             rememberPrompt(prompt)
-            submitPrompt(project, editor, prompt, psiFile.virtualFile.path, psiFile.language.id, contextSnippet)
+            submitPrompt(
+                project = project,
+                editor = editor,
+                prompt = prompt,
+                model = selectedModel,
+                filePath = psiFile.virtualFile.path,
+                languageId = psiFile.language.id,
+                snippet = contextSnippet
+            )
         }
 
         submitButton.addActionListener {
@@ -207,6 +242,7 @@ class SignalCodeInlineAction : AnAction() {
         project: com.intellij.openapi.project.Project,
         editor: Editor,
         prompt: String,
+        model: String,
         filePath: String,
         languageId: String?,
         snippet: String
@@ -240,6 +276,7 @@ class SignalCodeInlineAction : AnAction() {
                     backendClient.generate(
                         GenerateRequest(
                             prompt = prompt,
+                            model = model,
                             context = GenerateContext(
                                 filePath = filePath,
                                 selectionOrCaretSnippet = snippet,
@@ -376,6 +413,15 @@ class SignalCodeInlineAction : AnAction() {
 
     companion object {
         private const val MAX_HISTORY = 5
+        private const val DEFAULT_MODEL = "gemini-flash"
+        private val FALLBACK_MODELS = listOf(
+            "gemini-flash",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
+            "gemini-3-flash-preview",
+            "gemini-3.1-pro-preview"
+        )
     }
 }
 

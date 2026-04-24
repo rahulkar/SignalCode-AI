@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "check:model-catalog": "node ../scripts/sync-model-catalog.mjs --check",
+    "dev": "npm run check:model-catalog && tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "start": "npm run check:model-catalog && node dist/index.js",
     "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {

@@ -1,0 +1,29 @@
+{
+  "defaultModel": "gemini-flash",
+  "models": [
+    {
+      "alias": "gemini-flash",
+      "litellmModel": "gemini/gemini-2.5-flash"
+    },
+    {
+      "alias": "gemini-2.5-flash",
+      "litellmModel": "gemini/gemini-2.5-flash"
+    },
+    {
+      "alias": "gemini-2.5-flash-lite",
+      "litellmModel": "gemini/gemini-2.5-flash-lite"
+    },
+    {
+      "alias": "gemini-2.5-pro",
+      "litellmModel": "gemini/gemini-2.5-pro"
+    },
+    {
+      "alias": "gemini-3-flash-preview",
+      "litellmModel": "gemini/gemini-3-flash-preview"
+    },
+    {
+      "alias": "gemini-3.1-pro-preview",
+      "litellmModel": "gemini/gemini-3.1-pro-preview"
+    }
+  ]
+}

@@ -87,6 +87,18 @@ Expected:
 - LiteLLM available at `http://localhost:4000`
 - SQLite logging DB persisted under `litellm/data`
 
+Model aliases are managed from one source:
+
+- Edit `model-catalog.json`
+- Run `npm run models:sync` (or `node scripts/sync-model-catalog.mjs`)
+- This regenerates both `litellm/config.yaml` and `backend/src/modelCatalog.generated.ts`
+- Validate no drift with `npm run models:check`
+
+Drift guard behavior:
+
+- Backend `npm run dev` and `npm start` now run a catalog check first.
+- If generated files are stale, startup fails with a remediation message.
+
 ---
 
 ### 3) Start backend API
@@ -95,6 +107,7 @@ Expected:
 cd backend
 npm install
 copy .env.example .env
+npm run check:model-catalog
 npm run dev
 ```
 

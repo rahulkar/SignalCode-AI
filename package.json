@@ -1,0 +1,8 @@
+{
+  "name": "signalcode-ai-monorepo",
+  "private": true,
+  "scripts": {
+    "models:sync": "node scripts/sync-model-catalog.mjs",
+    "models:check": "node scripts/sync-model-catalog.mjs --check"
+  }
+}

@@ -6,6 +6,7 @@ export type TelemetryEventType =
 
 export interface GenerateRequest {
   prompt: string;
+  model?: string;
   context: {
     filePath: string;
     selectionOrCaretSnippet: string;

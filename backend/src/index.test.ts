@@ -36,6 +36,33 @@ describe("backend integrity behaviors", () => {
     assert.equal(statsResponse.body.totalTasks, 0);
   });
 
+  it("returns supported model list", async () => {
+    const app = createApp();
+    const response = await request(app).get("/api/models");
+    assert.equal(response.status, 200);
+    assert.ok(Array.isArray(response.body.supportedModels));
+    assert.ok(response.body.supportedModels.includes("gemini-flash"));
+    assert.equal(typeof response.body.defaultModel, "string");
+  });
+
+  it("rejects unsupported model names", async () => {
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+    const response = await request(app).post("/api/generate").send({
+      prompt: "bump a",
+      model: "gemini-unknown-xyz",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error, "Unsupported model");
+    assert.ok(Array.isArray(response.body.supportedModels));
+  });
+
   it("duplicate telemetry events are idempotent", async () => {
     const app = createApp({
       generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
