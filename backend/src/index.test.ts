@@ -351,6 +351,100 @@ describe("backend integrity behaviors", () => {
     assert.equal(postAcceptTasks.body.rows[0].secondsToFirstEdit, 10);
   });
 
+  it("counts delete plus insert churn for post-accept metrics even when net length is unchanged", async () => {
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    const generateResponse = await request(app).post("/api/generate").send({
+      prompt: "rewrite a block",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+    assert.equal(generateResponse.status, 200);
+
+    const taskId = generateResponse.body.task_id as string;
+    const diffId = generateResponse.body.diff_id as string;
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: diffId,
+      event: "ACCEPTED",
+      timestamp: "2026-04-24T10:00:00.000Z"
+    });
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "post-accept-edit-churn",
+      event: "DIFF_RENDERED",
+      timestamp: "2026-04-24T10:00:10.000Z",
+      meta: {
+        source: "post-accept",
+        activityType: "post_accept_edit",
+        charDelta: 0,
+        deletedChars: 28,
+        insertedChars: 28
+      }
+    });
+
+    const statsResponse = await request(app).get("/api/stats");
+    assert.equal(statsResponse.status, 200);
+    assert.equal(statsResponse.body.postAccept.avgCharDelta, 56);
+
+    const postAcceptTasks = await request(app).get("/api/stats/post-accept-tasks");
+    assert.equal(postAcceptTasks.status, 200);
+    assert.equal(postAcceptTasks.body.rows.length, 1);
+    assert.equal(postAcceptTasks.body.rows[0].maxCharDelta, 56);
+    assert.equal(postAcceptTasks.body.rows[0].maxDeletedChars, 28);
+    assert.equal(postAcceptTasks.body.rows[0].maxInsertedChars, 28);
+  });
+
+  it("ignores post-accept telemetry that occurred before first acceptance in KPI and task views", async () => {
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    const generateResponse = await request(app).post("/api/generate").send({
+      prompt: "order check",
+      context: {
+        filePath: "/tmp/file.ts",
+        selectionOrCaretSnippet: "const a = 1;",
+        languageId: "typescript"
+      }
+    });
+    assert.equal(generateResponse.status, 200);
+
+    const taskId = generateResponse.body.task_id as string;
+    const diffId = generateResponse.body.diff_id as string;
+
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: "post-before-accept",
+      event: "DIFF_RENDERED",
+      timestamp: "2026-04-24T10:00:00.000Z",
+      meta: { source: "post-accept", activityType: "post_accept_edit", charDelta: 9 }
+    });
+    await request(app).post("/api/telemetry").send({
+      task_id: taskId,
+      diff_id: diffId,
+      event: "ACCEPTED",
+      timestamp: "2026-04-24T10:00:05.000Z"
+    });
+
+    const statsResponse = await request(app).get("/api/stats");
+    assert.equal(statsResponse.status, 200);
+    assert.equal(statsResponse.body.postAccept.editedTaskRate, 0);
+    assert.equal(statsResponse.body.postAccept.avgCharDelta, 0);
+    assert.equal(statsResponse.body.postAccept.medianSecondsToFirstEdit, 0);
+
+    const postAcceptTasks = await request(app).get("/api/stats/post-accept-tasks");
+    assert.equal(postAcceptTasks.status, 200);
+    assert.equal(postAcceptTasks.body.rows.length, 0);
+  });
+
   it("excludes post-accept edits from acceptance funnel metrics", async () => {
     const app = createApp({
       generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"

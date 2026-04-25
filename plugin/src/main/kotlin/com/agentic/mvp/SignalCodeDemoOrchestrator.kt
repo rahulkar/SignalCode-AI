@@ -42,8 +42,19 @@ class SignalCodeDemoOrchestrator(
     private val model: String,
     private val backendClient: BackendClient = BackendClient("http://localhost:3001"),
     private val log: (String) -> Unit,
-    private val progress: (DemoProgressEvent) -> Unit = {}
+    private val progress: (DemoProgressEvent) -> Unit = {},
+    private val uiModalityState: ModalityState = ModalityState.defaultModalityState()
 ) {
+    private enum class DemoDecision {
+        ACCEPT,
+        REJECT
+    }
+
+    private sealed interface LlmStepOutcome {
+        data class Accepted(val applyResult: ApplyResult) : LlmStepOutcome
+        data class Rejected(val targetFilePath: String) : LlmStepOutcome
+    }
+
     suspend fun run(): SignalCodeDemoSummary {
         val projectRoot = project.basePath?.let { Paths.get(it).normalize() }
             ?: throw IllegalStateException("Open a local IntelliJ project folder before running demo mode.")
@@ -79,9 +90,15 @@ class SignalCodeDemoOrchestrator(
                 when (step) {
                     is DemoLlmStep -> {
                         log("[${stepIndex}/${steps.size}] ${step.title}")
-                        val result = executeLlmStep(projectRoot, seedPath, step, stepIndex, steps.size)
-                        touchedFiles += relativizeForLog(projectRoot, result.targetFilePath)
-                        log("Accepted LLM output for ${relativizeForLog(projectRoot, result.targetFilePath)}.")
+                        when (val result = executeLlmStep(projectRoot, seedPath, step, stepIndex, steps.size)) {
+                            is LlmStepOutcome.Accepted -> {
+                                touchedFiles += relativizeForLog(projectRoot, result.applyResult.targetFilePath)
+                                log("Accepted LLM output for ${relativizeForLog(projectRoot, result.applyResult.targetFilePath)}.")
+                            }
+                            is LlmStepOutcome.Rejected -> {
+                                log("Rejected LLM output for ${relativizeForLog(projectRoot, result.targetFilePath)} (scripted demo rejection).")
+                            }
+                        }
                     }
 
                     is DemoManualEditStep -> {
@@ -123,7 +140,7 @@ class SignalCodeDemoOrchestrator(
         step: DemoLlmStep,
         stepIndex: Int,
         totalSteps: Int
-    ): ApplyResult {
+    ): LlmStepOutcome {
         progress(
             DemoProgressEvent.StepPhase(
                 stepIndex,
@@ -189,6 +206,40 @@ class SignalCodeDemoOrchestrator(
                     .plus(previewMetrics?.toMeta().orEmpty())
             )
         )
+
+        if (step.decision == DemoDecision.REJECT) {
+            progress(
+                DemoProgressEvent.StepPhase(
+                    stepIndex,
+                    totalSteps,
+                    step.title,
+                    "review",
+                    "Scripted reviewer rejection for demo coverage."
+                )
+            )
+            progress(
+                DemoProgressEvent.StepPhase(
+                    stepIndex,
+                    totalSteps,
+                    step.title,
+                    "telemetry",
+                    "Submitting REJECTED telemetry."
+                )
+            )
+            emitTelemetry(
+                TelemetryRequest(
+                    task_id = response.task_id,
+                    diff_id = response.diff_id,
+                    event = TelemetryEventType.REJECTED,
+                    meta = baseMeta + mapOf(
+                        "fileAction" to fileActionFor(operation.kind),
+                        "demoScriptedRejection" to true,
+                        "rejectionReason" to "Scripted reject path for executive demo realism."
+                    )
+                )
+            )
+            return LlmStepOutcome.Rejected(operation.targetFilePath)
+        }
 
         progress(
             DemoProgressEvent.StepPhase(
@@ -275,7 +326,7 @@ class SignalCodeDemoOrchestrator(
             )
         )
 
-        return applyResult
+        return LlmStepOutcome.Accepted(applyResult)
     }
 
     private suspend fun executeManualEditStep(
@@ -459,7 +510,7 @@ class SignalCodeDemoOrchestrator(
                     wroteWithDocument = true
                 }
             }
-        }, ModalityState.any())
+        }, uiModalityState)
 
         if (wroteWithDocument) {
             return
@@ -587,6 +638,28 @@ class SignalCodeDemoOrchestrator(
                 snapshotFiles = emptyList(),
                 useFullTargetFileAsSnippet = true
             ),
+            DemoLlmStep(
+                title = "Propose aggressive engine refactor (scripted reject)",
+                prompt = "Refactor CalculatorEngine to optimize operation-state transitions with a compact mode enum and lazy accumulator updates. Keep behavior identical and simplify conditionals.",
+                mode = AgentMode.UPDATE_SELECTION,
+                targetFilePath = "src/main/java/com/signalcode/demo/calculator/CalculatorEngine.java",
+                languageId = "java",
+                contextLead = "",
+                snapshotFiles = emptyList(),
+                useFullTargetFileAsSnippet = true,
+                decision = DemoDecision.REJECT
+            ),
+            DemoLlmStep(
+                title = "Propose UI visual overhaul (scripted reject)",
+                prompt = "Rework CalculatorFrame styling to use a denser keypad layout, alternate color palette, and compact display typography while keeping functionality unchanged.",
+                mode = AgentMode.UPDATE_SELECTION,
+                targetFilePath = "src/main/java/com/signalcode/demo/calculator/CalculatorFrame.java",
+                languageId = "java",
+                contextLead = "",
+                snapshotFiles = emptyList(),
+                useFullTargetFileAsSnippet = true,
+                decision = DemoDecision.REJECT
+            ),
             DemoManualEditStep(
                 title = "Simulate a presenter tweak in the frame",
                 relativePath = "src/main/java/com/signalcode/demo/calculator/CalculatorFrame.java",
@@ -653,6 +726,7 @@ class SignalCodeDemoOrchestrator(
         val contextLead: String,
         val snapshotFiles: List<String>,
         val useFullTargetFileAsSnippet: Boolean = false,
+        val decision: DemoDecision = DemoDecision.ACCEPT,
         override val pauseAfterMs: Long = 1_400L
     ) : DemoStep
 

@@ -391,15 +391,19 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   const firstPostAcceptByTask = new Map<string, string>();
   const maxCharDeltaByTask = new Map<string, number>();
   for (const row of postAcceptRows) {
-    if (!acceptedByTask.has(row.task_id)) {
+    const acceptedAt = acceptedByTask.get(row.task_id);
+    if (!acceptedAt) {
+      continue;
+    }
+    if (!isEventOnOrAfterAcceptance(row.created_at, acceptedAt)) {
       continue;
     }
     if (!firstPostAcceptByTask.has(row.task_id)) {
       firstPostAcceptByTask.set(row.task_id, row.created_at);
     }
     const meta = parseMeta(row.metadata);
-    const charDelta = typeof meta.charDelta === "number" ? meta.charDelta : null;
-    if (charDelta !== null) {
+    const charDelta = readPostAcceptCharDelta(meta);
+    if (charDelta > 0) {
       const previous = maxCharDeltaByTask.get(row.task_id) ?? 0;
       maxCharDeltaByTask.set(row.task_id, Math.max(previous, charDelta));
     }
@@ -577,17 +581,26 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
 
     const aggregates = new Map<
       string,
-      { firstEditedAt: string; maxCharDelta: number; maxLineDelta: number; editsAfterAccept: number }
+      {
+        firstEditedAt: string;
+        maxCharDelta: number;
+        maxLineDelta: number;
+        maxDeletedChars: number;
+        maxInsertedChars: number;
+        editsAfterAccept: number;
+      }
     >();
 
     for (const row of postAcceptRows) {
       const accepted = acceptedByTask.get(row.task_id);
       if (!accepted) continue;
-      if (new Date(row.created_at).getTime() < new Date(accepted.acceptedAt).getTime()) continue;
+      if (!isEventOnOrAfterAcceptance(row.created_at, accepted.acceptedAt)) continue;
 
       const meta = parseMeta(row.metadata);
-      const charDelta = typeof meta.charDelta === "number" ? meta.charDelta : 0;
-      const lineDelta = typeof meta.lineDelta === "number" ? meta.lineDelta : 0;
+      const charDelta = readPostAcceptCharDelta(meta);
+      const lineDelta = readPostAcceptLineDelta(meta);
+      const deletedChars = readNonNegativeMetaNumber(meta, "deletedChars") ?? 0;
+      const insertedChars = readNonNegativeMetaNumber(meta, "insertedChars") ?? 0;
       const editsAfterAccept = typeof meta.editsAfterAccept === "number" ? meta.editsAfterAccept : 0;
 
       const current = aggregates.get(row.task_id);
@@ -596,11 +609,15 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
           firstEditedAt: row.created_at,
           maxCharDelta: charDelta,
           maxLineDelta: lineDelta,
+          maxDeletedChars: deletedChars,
+          maxInsertedChars: insertedChars,
           editsAfterAccept
         });
       } else {
         current.maxCharDelta = Math.max(current.maxCharDelta, charDelta);
         current.maxLineDelta = Math.max(current.maxLineDelta, lineDelta);
+        current.maxDeletedChars = Math.max(current.maxDeletedChars, deletedChars);
+        current.maxInsertedChars = Math.max(current.maxInsertedChars, insertedChars);
         current.editsAfterAccept = Math.max(current.editsAfterAccept, editsAfterAccept);
       }
     }
@@ -620,6 +637,8 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
           secondsToFirstEdit: Number(Math.max(secondsToFirstEdit, 0).toFixed(1)),
           maxCharDelta: aggregate.maxCharDelta,
           maxLineDelta: aggregate.maxLineDelta,
+          maxDeletedChars: aggregate.maxDeletedChars,
+          maxInsertedChars: aggregate.maxInsertedChars,
           editsAfterAccept: aggregate.editsAfterAccept
         };
       })
@@ -742,6 +761,44 @@ function deriveAcceptedAiLines(
   return Math.max(submissionAiLines - lineDelta, 0);
 }
 
+function readPostAcceptCharDelta(meta: Record<string, unknown>): number {
+  const direct = readNonNegativeMetaNumber(meta, "charDelta");
+  const deleted = readNonNegativeMetaNumber(meta, "deletedChars");
+  const inserted = readNonNegativeMetaNumber(meta, "insertedChars");
+  const churn = deleted === null && inserted === null ? null : (deleted ?? 0) + (inserted ?? 0);
+
+  if (direct === null) {
+    return churn ?? 0;
+  }
+  if (churn === null) {
+    return direct;
+  }
+  return Math.max(direct, churn);
+}
+
+function readPostAcceptLineDelta(meta: Record<string, unknown>): number {
+  const direct = readNonNegativeMetaNumber(meta, "lineDelta");
+  const deleted = readNonNegativeMetaNumber(meta, "deletedLines");
+  const inserted = readNonNegativeMetaNumber(meta, "insertedLines");
+  const churn = deleted === null && inserted === null ? null : (deleted ?? 0) + (inserted ?? 0);
+
+  if (direct === null) {
+    return churn ?? 0;
+  }
+  if (churn === null) {
+    return direct;
+  }
+  return Math.max(direct, churn);
+}
+
+function readNonNegativeMetaNumber(meta: Record<string, unknown>, key: string): number | null {
+  const value = meta[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(value, 0);
+}
+
 function readMetaNumber(meta: Record<string, unknown> | undefined, key: string): number | null {
   if (!meta) return null;
   const value = meta[key];
@@ -772,6 +829,15 @@ function parseStatsRange(value: unknown): StatsRange {
     return value;
   }
   return "24h";
+}
+
+function isEventOnOrAfterAcceptance(eventTimestamp: string, acceptedTimestamp: string): boolean {
+  const eventMs = new Date(eventTimestamp).getTime();
+  const acceptedMs = new Date(acceptedTimestamp).getTime();
+  if (!Number.isFinite(eventMs) || !Number.isFinite(acceptedMs)) {
+    return false;
+  }
+  return eventMs >= acceptedMs;
 }
 
 function buildTimeSeries(rows: TimeSeriesRow[], rangeConfig: RangeConfig): TimeSeriesPoint[] {

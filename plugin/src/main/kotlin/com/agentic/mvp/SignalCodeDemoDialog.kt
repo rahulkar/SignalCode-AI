@@ -66,6 +66,8 @@ class SignalCodeDemoDialog(
         SwingConstants.LEFT
     )
     private var isRunning = false
+    @Volatile
+    private var dialogModalityState: ModalityState = ModalityState.defaultModalityState()
 
     init {
         title = "Executive demo mode"
@@ -133,6 +135,7 @@ class SignalCodeDemoDialog(
                 return@addActionListener
             }
             isRunning = true
+            dialogModalityState = ModalityState.current()
             startDemoButton.isEnabled = false
             statusLabel.text = "Running live demo with $selectedModel..."
             resetLiveProgress()
@@ -143,7 +146,8 @@ class SignalCodeDemoDialog(
                     project = projectRef,
                     model = selectedModel,
                     log = { message -> appendLog(message) },
-                    progress = { event -> onProgressEvent(event) }
+                    progress = { event -> onProgressEvent(event) },
+                    uiModalityState = dialogModalityState
                 )
 
                 try {
@@ -190,8 +194,9 @@ class SignalCodeDemoDialog(
             2. Create a small Java calculator project structure in that folder.
             3. Use the actual generate API and selected model to create multiple production-style files.
             4. Apply one real patch to an existing file so the run includes both new-file generation and update-style work.
-            5. Make follow-up local edits after acceptance to mimic human tweaks and trigger post-accept telemetry.
-            6. Feed the full story into Telemetry Command Center: generated tasks, accepts, created files, edited files, and post-accept rework.
+            5. Intentionally reject one or more generated updates to simulate realistic review decisions.
+            6. Make follow-up local edits after acceptance to mimic human tweaks and trigger post-accept telemetry.
+            7. Feed the full story into Telemetry Command Center: generated tasks, accepts, rejects, created files, edited files, and post-accept rework.
             """.trimIndent()
         ).apply {
             isEditable = false
@@ -379,8 +384,9 @@ class SignalCodeDemoDialog(
             return
         }
 
-        // Keep progress and log updates flowing while this modal dialog remains open.
-        application.invokeLater({ action() }, ModalityState.any())
+        // Run callbacks in this dialog's modality scope so updates keep flowing while open,
+        // without bypassing transaction safety.
+        application.invokeLater({ action() }, dialogModalityState)
     }
 
     private fun notify(content: String, type: NotificationType) {

@@ -553,6 +553,8 @@ export function PostAcceptReworkPanel({ rows, isDark }: { rows: PostAcceptTaskRe
                       <Th>Prompt</Th>
                       <Th>Model</Th>
                       <Th>Max Char Delta</Th>
+                      <Th>Max Deleted</Th>
+                      <Th>Max Inserted</Th>
                       <Th>Edits</Th>
                       <Th>First Edit</Th>
                     </tr>
@@ -564,6 +566,8 @@ export function PostAcceptReworkPanel({ rows, isDark }: { rows: PostAcceptTaskRe
                         <Td>{row.promptSnippet}</Td>
                         <Td>{row.model}</Td>
                         <Td>{String(row.maxCharDelta)}</Td>
+                        <Td>{String(row.maxDeletedChars ?? 0)}</Td>
+                        <Td>{String(row.maxInsertedChars ?? 0)}</Td>
                         <Td>{String(row.editsAfterAccept)}</Td>
                         <Td>{`${row.secondsToFirstEdit.toFixed(1)}s`}</Td>
                       </tr>

@@ -22,6 +22,7 @@ class SignalCodePlanPreviewDialog(
     init {
         title = "Review agent plan"
         setOKButtonText("Apply")
+        setCancelButtonText("Reject")
         init()
     }
 

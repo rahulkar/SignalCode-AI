@@ -7,10 +7,13 @@ import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.StartupActivity
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.util.concurrency.AppExecutorUtil
+import java.nio.file.Files
+import java.nio.file.Paths
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -61,7 +64,10 @@ class IdeTelemetryStartupActivity : StartupActivity.DumbAware {
             )
 
         AppExecutorUtil.getAppScheduledExecutorService().scheduleWithFixedDelay(
-            { emitter.emitHeartbeat() },
+            {
+                emitter.emitHeartbeat()
+                emitter.emitPostAcceptPoll()
+            },
             15,
             15,
             TimeUnit.SECONDS
@@ -111,6 +117,11 @@ private class IdeTelemetryEmitter(
         }
     }
 
+    fun emitPostAcceptPoll() {
+        val pending = PostAcceptTracker.collectPendingEmissions { path -> readCurrentText(path) }
+        pending.forEach { emission -> emitPostAccept(emission) }
+    }
+
     private fun emitWithMeta(activityType: String, filePath: String?, languageId: String?) {
         runCatching {
             val meta = mutableMapOf<String, Any>(
@@ -132,5 +143,24 @@ private class IdeTelemetryEmitter(
                 )
             )
         }
+    }
+
+    private fun readCurrentText(filePath: String): String? {
+        val localFileSystem = LocalFileSystem.getInstance()
+        val virtualFile = localFileSystem.findFileByPath(filePath) ?: localFileSystem.refreshAndFindFileByPath(filePath)
+        if (virtualFile != null) {
+            FileDocumentManager.getInstance().getDocument(virtualFile)?.let { return it.text }
+        }
+
+        return runCatching {
+            val target = Paths.get(filePath)
+            if (!Files.exists(target)) {
+                ""
+            } else if (Files.isRegularFile(target)) {
+                Files.readString(target)
+            } else {
+                null
+            }
+        }.getOrNull()
     }
 }

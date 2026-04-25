@@ -58,6 +58,8 @@ export interface PostAcceptTaskReworkRow {
   secondsToFirstEdit: number;
   maxCharDelta: number;
   maxLineDelta: number;
+  maxDeletedChars: number;
+  maxInsertedChars: number;
   editsAfterAccept: number;
 }
 
