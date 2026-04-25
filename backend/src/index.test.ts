@@ -1,5 +1,9 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import request from "supertest";
 import { db, resetTelemetryDb } from "./db.js";
 import { createApp } from "./index.js";
@@ -7,6 +11,8 @@ import { createApp } from "./index.js";
 function clearDb(): void {
   resetTelemetryDb();
 }
+
+const ownershipFixturePath = fileURLToPath(new URL("./fixtures/team.minimal.json", import.meta.url));
 
 describe("backend integrity behaviors", () => {
   beforeEach(() => {
@@ -647,5 +653,234 @@ describe("backend integrity behaviors", () => {
     assert.equal(exportResponse.status, 200);
     assert.equal(exportResponse.body.totalRecords, 1);
     assert.equal(exportResponse.body.records[0].pr_id, generateWithTelemetry.body.task_id);
+  });
+
+  it("applies team ownership mapping and supports team filtering", async () => {
+    const priorTeamConfigPath = process.env.TEAM_CONFIG_PATH;
+    const priorTeamsConfigPath = process.env.TEAMS_CONFIG_PATH;
+    process.env.TEAM_CONFIG_PATH = ownershipFixturePath;
+    delete process.env.TEAMS_CONFIG_PATH;
+
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    try {
+      const generateResponse = await request(app).post("/api/generate").send({
+        prompt: "team ownership test",
+        context: {
+          filePath: "/tmp/file.ts",
+          selectionOrCaretSnippet: "const a = 1;",
+          languageId: "typescript"
+        }
+      });
+
+      assert.equal(generateResponse.status, 200);
+      const taskId = generateResponse.body.task_id as string;
+      const diffId = generateResponse.body.diff_id as string;
+
+      await request(app).post("/api/telemetry").send({
+        task_id: taskId,
+        diff_id: diffId,
+        event: "DIFF_RENDERED",
+        timestamp: "2026-04-24T10:00:00.000Z",
+        meta: { filePath: "/tmp/file.ts", acceptedLines: 24 }
+      });
+      await request(app).post("/api/telemetry").send({
+        task_id: taskId,
+        diff_id: `${diffId}-accepted`,
+        event: "ACCEPTED",
+        timestamp: "2026-04-24T10:00:05.000Z",
+        meta: { filePath: "/tmp/file.ts" }
+      });
+
+      const exportResponse = await request(app).get("/api/export/pr-snapshots");
+      assert.equal(exportResponse.status, 200);
+      assert.equal(exportResponse.body.records[0].team, "sandbox");
+      assert.equal(exportResponse.body.records[0].author_id, "eng-demo-01");
+
+      const teamsResponse = await request(app).get("/api/teams");
+      assert.equal(teamsResponse.status, 200);
+      assert.ok(Array.isArray(teamsResponse.body.teams));
+      assert.ok(teamsResponse.body.teams.includes("sandbox"));
+
+      const sandboxStats = await request(app).get("/api/stats").query({ team: "sandbox" });
+      assert.equal(sandboxStats.status, 200);
+      assert.equal(sandboxStats.body.totalTasks, 1);
+
+      const otherStats = await request(app).get("/api/stats").query({ team: "platform-commerce" });
+      assert.equal(otherStats.status, 200);
+      assert.equal(otherStats.body.totalTasks, 0);
+    } finally {
+      if (priorTeamConfigPath === undefined) {
+        delete process.env.TEAM_CONFIG_PATH;
+      } else {
+        process.env.TEAM_CONFIG_PATH = priorTeamConfigPath;
+      }
+      if (priorTeamsConfigPath === undefined) {
+        delete process.env.TEAMS_CONFIG_PATH;
+      } else {
+        process.env.TEAMS_CONFIG_PATH = priorTeamsConfigPath;
+      }
+    }
+  });
+
+  it("applies configured team at generate time before telemetry events arrive", async () => {
+    const priorTeamConfigPath = process.env.TEAM_CONFIG_PATH;
+    const priorTeamsConfigPath = process.env.TEAMS_CONFIG_PATH;
+    process.env.TEAM_CONFIG_PATH = ownershipFixturePath;
+    delete process.env.TEAMS_CONFIG_PATH;
+
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    try {
+      const generateResponse = await request(app).post("/api/generate").send({
+        prompt: "team assignment on generate",
+        context: {
+          filePath: "/tmp/file.ts",
+          selectionOrCaretSnippet: "const a = 1;",
+          languageId: "typescript"
+        }
+      });
+
+      assert.equal(generateResponse.status, 200);
+
+      const sandboxStats = await request(app).get("/api/stats").query({ team: "sandbox" });
+      assert.equal(sandboxStats.status, 200);
+      assert.equal(sandboxStats.body.totalTasks, 1);
+    } finally {
+      if (priorTeamConfigPath === undefined) {
+        delete process.env.TEAM_CONFIG_PATH;
+      } else {
+        process.env.TEAM_CONFIG_PATH = priorTeamConfigPath;
+      }
+      if (priorTeamsConfigPath === undefined) {
+        delete process.env.TEAMS_CONFIG_PATH;
+      } else {
+        process.env.TEAMS_CONFIG_PATH = priorTeamsConfigPath;
+      }
+    }
+  });
+
+  it("resolves team.json from projectRootPath when telemetry file paths are relative", async () => {
+    const priorTeamConfigPath = process.env.TEAM_CONFIG_PATH;
+    const priorTeamsConfigPath = process.env.TEAMS_CONFIG_PATH;
+    delete process.env.TEAM_CONFIG_PATH;
+    delete process.env.TEAMS_CONFIG_PATH;
+
+    const projectRoot = mkdtempSync(path.join(tmpdir(), "signalcode-team-"));
+    writeFileSync(
+      path.join(projectRoot, "team.json"),
+      JSON.stringify(
+        {
+          team: "sandbox-local",
+          author_id: "eng-local-01"
+        },
+        null,
+        2
+      )
+    );
+
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    try {
+      const generateResponse = await request(app).post("/api/generate").send({
+        prompt: "relative ownership test",
+        context: {
+          filePath: "src/main/java/com/acme/App.java",
+          projectRootPath: projectRoot,
+          selectionOrCaretSnippet: "class App {}",
+          languageId: "java"
+        }
+      });
+
+      assert.equal(generateResponse.status, 200);
+      const taskId = generateResponse.body.task_id as string;
+      const diffId = generateResponse.body.diff_id as string;
+
+      await request(app).post("/api/telemetry").send({
+        task_id: taskId,
+        diff_id: diffId,
+        event: "DIFF_RENDERED",
+        timestamp: "2026-04-25T09:40:00.000Z",
+        meta: { filePath: "src/main/java/com/acme/App.java", acceptedLines: 10 }
+      });
+
+      const exportResponse = await request(app).get("/api/export/pr-snapshots");
+      assert.equal(exportResponse.status, 200);
+      assert.equal(exportResponse.body.records[0].team, "sandbox-local");
+      assert.equal(exportResponse.body.records[0].author_id, "eng-local-01");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+      if (priorTeamConfigPath === undefined) {
+        delete process.env.TEAM_CONFIG_PATH;
+      } else {
+        process.env.TEAM_CONFIG_PATH = priorTeamConfigPath;
+      }
+      if (priorTeamsConfigPath === undefined) {
+        delete process.env.TEAMS_CONFIG_PATH;
+      } else {
+        process.env.TEAMS_CONFIG_PATH = priorTeamsConfigPath;
+      }
+    }
+  });
+
+  it("prefers telemetry-provided team and author_id when present", async () => {
+    const priorTeamConfigPath = process.env.TEAM_CONFIG_PATH;
+    const priorTeamsConfigPath = process.env.TEAMS_CONFIG_PATH;
+    delete process.env.TEAM_CONFIG_PATH;
+    delete process.env.TEAMS_CONFIG_PATH;
+
+    const app = createApp({
+      generateFn: async () => "<<<<SEARCH\nconst a = 1;\n====\nconst a = 2;\n>>>>REPLACE"
+    });
+
+    try {
+      const generateResponse = await request(app).post("/api/generate").send({
+        prompt: "metadata ownership test",
+        context: {
+          filePath: "src/main/java/com/acme/App.java",
+          projectRootPath: "C:\\Users\\someone\\IdeaProjects\\acme",
+          selectionOrCaretSnippet: "class App {}",
+          languageId: "java"
+        }
+      });
+      assert.equal(generateResponse.status, 200);
+
+      const taskId = generateResponse.body.task_id as string;
+      const diffId = generateResponse.body.diff_id as string;
+      await request(app).post("/api/telemetry").send({
+        task_id: taskId,
+        diff_id: diffId,
+        event: "DIFF_RENDERED",
+        timestamp: "2026-04-25T10:10:00.000Z",
+        meta: {
+          filePath: "src/main/java/com/acme/App.java",
+          team: "sandbox-meta",
+          author_id: "eng-meta-01",
+          acceptedLines: 10
+        }
+      });
+
+      const exportResponse = await request(app).get("/api/export/pr-snapshots");
+      assert.equal(exportResponse.status, 200);
+      assert.equal(exportResponse.body.records[0].team, "sandbox-meta");
+      assert.equal(exportResponse.body.records[0].author_id, "eng-meta-01");
+    } finally {
+      if (priorTeamConfigPath === undefined) {
+        delete process.env.TEAM_CONFIG_PATH;
+      } else {
+        process.env.TEAM_CONFIG_PATH = priorTeamConfigPath;
+      }
+      if (priorTeamsConfigPath === undefined) {
+        delete process.env.TEAMS_CONFIG_PATH;
+      } else {
+        process.env.TEAMS_CONFIG_PATH = priorTeamsConfigPath;
+      }
+    }
   });
 });

@@ -19,7 +19,9 @@ data class GenerateContext(
     val projectRootPath: String?,
     val targetFilePath: String?,
     val selectionOrCaretSnippet: String,
-    val languageId: String?
+    val languageId: String?,
+    val team: String? = null,
+    val author_id: String? = null
 )
 
 data class GenerateResponse(

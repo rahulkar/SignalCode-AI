@@ -41,5 +41,7 @@ data class EditorContextSnapshot(
     val filePath: String,
     val languageId: String?,
     val fileName: String,
-    val projectRootPath: String?
+    val projectRootPath: String?,
+    val team: String?,
+    val authorId: String?
 )

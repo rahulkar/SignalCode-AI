@@ -271,6 +271,8 @@ export function ActivityTable({ rows }: { rows: StatsResponse["recentActivity"] 
                 <Th>Timestamp</Th>
                 <Th>Prompt snippet</Th>
                 <Th>Model</Th>
+                <Th>Team</Th>
+                <Th>Author</Th>
                 <Th>Outcome</Th>
               </tr>
             </thead>
@@ -280,6 +282,8 @@ export function ActivityTable({ rows }: { rows: StatsResponse["recentActivity"] 
                   <Td>{new Date(row.timestamp).toLocaleString()}</Td>
                   <Td>{row.promptSnippet}</Td>
                   <Td>{row.model}</Td>
+                  <Td>{row.team ?? "unassigned"}</Td>
+                  <Td>{row.author_id ?? "n/a"}</Td>
                   <Td>
                     <OutcomePill outcome={row.outcome} />
                   </Td>
@@ -302,6 +306,9 @@ export function ControlPanel(props: {
   onTimeRangeChange: (value: StatsRange) => void;
   query: string;
   onQueryChange: (value: string) => void;
+  teamFilter: string;
+  teamOptions: readonly string[];
+  onTeamFilterChange: (value: string) => void;
   outcomeFilter: "ALL" | "ACCEPTED" | "REJECTED" | "ITERATED" | "DIFF_RENDERED";
   onOutcomeFilterChange: (value: "ALL" | "ACCEPTED" | "REJECTED" | "ITERATED" | "DIFF_RENDERED") => void;
   onRefresh: () => void;
@@ -372,6 +379,19 @@ export function ControlPanel(props: {
             Search
           </span>
           <input value={props.query} onChange={(e) => props.onQueryChange(e.target.value)} className="control-input" placeholder="Prompt or model..." />
+        </label>
+        <label className="control-row">
+          <span className="control-label">
+            <Icon name="tasks" size={14} />
+            Team
+          </span>
+          <select value={props.teamFilter} onChange={(e) => props.onTeamFilterChange(e.target.value)} className="control-input">
+            {props.teamOptions.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="control-row">
           <span className="control-label">
@@ -552,6 +572,8 @@ export function PostAcceptReworkPanel({ rows, isDark }: { rows: PostAcceptTaskRe
                       <Th>Task</Th>
                       <Th>Prompt</Th>
                       <Th>Model</Th>
+                      <Th>Team</Th>
+                      <Th>Author</Th>
                       <Th>Max Char Delta</Th>
                       <Th>Max Deleted</Th>
                       <Th>Max Inserted</Th>
@@ -565,6 +587,8 @@ export function PostAcceptReworkPanel({ rows, isDark }: { rows: PostAcceptTaskRe
                         <Td>{row.taskId.slice(0, 8)}</Td>
                         <Td>{row.promptSnippet}</Td>
                         <Td>{row.model}</Td>
+                        <Td>{row.team ?? "unassigned"}</Td>
+                        <Td>{row.author_id ?? "n/a"}</Td>
                         <Td>{String(row.maxCharDelta)}</Td>
                         <Td>{String(row.maxDeletedChars ?? 0)}</Td>
                         <Td>{String(row.maxInsertedChars ?? 0)}</Td>

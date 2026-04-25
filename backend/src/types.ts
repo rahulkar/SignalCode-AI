@@ -35,6 +35,8 @@ export interface GenerateRequest {
     targetFilePath?: string;
     selectionOrCaretSnippet: string;
     languageId?: string;
+    team?: string;
+    author_id?: string;
   };
 }
 
@@ -71,6 +73,8 @@ export interface RecentActivityRow {
   outcome: TelemetryEventType;
   task_id: string;
   diff_id: string;
+  team: string | null;
+  author_id: string | null;
 }
 
 export interface StatsResponse {
@@ -111,6 +115,8 @@ export interface PostAcceptTaskReworkRow {
   taskId: string;
   promptSnippet: string;
   model: string;
+  team: string | null;
+  author_id: string | null;
   firstAcceptedAt: string;
   firstEditedAt: string;
   secondsToFirstEdit: number;
@@ -147,4 +153,8 @@ export interface ExportChangeSnapshotsResponse {
   exportedAt: string;
   totalRecords: number;
   records: ExportChangeSnapshotRow[];
+}
+
+export interface TeamOptionsResponse {
+  teams: string[];
 }

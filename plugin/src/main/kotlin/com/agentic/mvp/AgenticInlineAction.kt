@@ -105,7 +105,9 @@ class SignalCodeInlineAction : AnAction("SignalCode AI", "Open SignalCode AI", S
                                 projectRootPath = context.projectRootPath,
                                 targetFilePath = submission.targetFilePath,
                                 selectionOrCaretSnippet = context.contextSnippet,
-                                languageId = context.languageId
+                                languageId = context.languageId,
+                                team = context.team,
+                                author_id = context.authorId
                             )
                         )
                     )
@@ -270,13 +272,16 @@ class SignalCodeInlineAction : AnAction("SignalCode AI", "Open SignalCode AI", S
         } else {
             nearbySnippet(editor)
         }
+        val ownership = TeamOwnershipResolver.resolve(filePath, project.basePath)
         return EditorContextSnapshot(
             contextSnippet = contextSnippet,
             contextLabel = if (hasSelection) "Selected code" else "Nearby code context",
             filePath = filePath,
             languageId = languageId,
             fileName = File(filePath).name,
-            projectRootPath = project.basePath
+            projectRootPath = project.basePath,
+            team = ownership.team,
+            authorId = ownership.authorId
         )
     }
 
@@ -312,7 +317,7 @@ class SignalCodeInlineAction : AnAction("SignalCode AI", "Open SignalCode AI", S
             "generatedChars" to generatedText.length,
             "generatedLines" to lineCount(generatedText),
             "targetFileProvided" to !submission.targetFilePath.isNullOrBlank()
-        ) + usage.toMeta()
+        ) + TeamOwnership(context.team, context.authorId).toMeta() + usage.toMeta()
     }
 
     private fun buildPreviewMetrics(

@@ -96,6 +96,53 @@ Plugin target: IntelliJ Platform build `241+` (IntelliJ IDEA 2024.1+).
 - post-accept telemetry from both document-change callbacks and polling
 - dashboard KPIs for acceptance, iteration behavior, and post-accept edits
 - export endpoint for PR-style telemetry snapshots
+- team and author enrichment on tasks and exports
+- team-scoped filtering via `/api/teams`, `/api/stats?team=...`, and team-aware export endpoints
+- ownership visibility in plugin header (`Team`, `Author`) before generation
+
+## Feature Coverage (Current)
+
+- Generation and review:
+  - update selection
+  - insert into file
+  - create file
+- Telemetry lifecycle:
+  - `DIFF_RENDERED`
+  - `ACCEPTED`
+  - `REJECTED`
+  - `ITERATED`
+- IDE activity:
+  - opened
+  - created
+  - edited (throttled)
+  - heartbeat
+- Post-accept rework:
+  - baseline capture on accept
+  - diff/churn tracking after accept
+  - KPI rollups and top-task ranking
+- Team and author ownership:
+  - config-based resolution (`team.json`/`teams.json`)
+  - plugin-provided ownership metadata
+  - persisted fields in tasks and export snapshots
+- Dashboard analytics:
+  - acceptance funnels
+  - momentum trends
+  - recent activity
+  - team filter
+  - post-accept rework panel
+
+## Use-Case Examples
+
+- `cass` service flow:
+  - developer in a `cass` codebase generates and reviews a patch in IntelliJ
+  - plugin sends lifecycle telemetry with context, team, and author
+  - dashboard shows `cass` activity and export rows with populated ownership
+- Team performance slicing:
+  - analytics lead filters `/api/stats?team=sandbox`
+  - compares acceptance and rework trends by team over `24h` or `7d`
+- Executive walkthrough:
+  - run live demo mode
+  - generate realistic telemetry and exportable snapshots for stakeholder review
 
 ## Runtime Flow
 
@@ -114,10 +161,69 @@ Plugin target: IntelliJ Platform build `241+` (IntelliJ IDEA 2024.1+).
 - `POST /api/telemetry`
 - `GET /api/stats?range=15m|1h|24h|7d`
 - `GET /api/stats/post-accept-tasks`
+- `GET /api/teams`
 - `GET /api/ide/activity`
 - `GET /api/ide/events`
 - `GET /api/export/pr-snapshots`
 - `POST /api/admin/reset-telemetry`
+
+`/api/stats`, `/api/stats/post-accept-tasks`, and `/api/export/pr-snapshots` also accept optional `team=<team-name>` for team-scoped analytics.
+
+## Ownership Mapping (`team.json`)
+
+SignalCode can enrich telemetry tasks with `team` and `author_id` by reading a lightweight ownership file.
+
+Lookup order:
+
+- `TEAM_CONFIG_PATH` (or legacy `TEAMS_CONFIG_PATH`)
+- nearest `team.json` / `teams.json` walking up from task file paths and `projectRootPath`
+- `team.json` / `teams.json` in the current working directory
+- `team.json` / `teams.json` one directory above the current working directory
+
+Notes:
+
+- In Docker, backend cannot read host IDE paths directly (`C:\...` / `/Users/...`) unless mounted; `docker-compose.yml` mounts repo-root `teams.json` to `/app/teams.json` and sets `TEAM_CONFIG_PATH`.
+- Plugin telemetry can also carry `team` and `author_id`; backend will prefer those explicit values when present.
+
+Recommended format:
+
+```json
+{
+  "team": "platform-commerce",
+  "author_id": "eng-demo-01"
+}
+```
+
+Legacy fallback keys (`default_team`, `default_author_id`) are also supported.
+
+### Team/Author Examples
+
+`cass` project ownership example:
+
+```json
+{
+  "team": "cass-platform",
+  "author_id": "eng-cass-01"
+}
+```
+
+Example export shape (ownership populated):
+
+```json
+{
+  "pr_id": "4a9d9225-d10d-412e-902b-cd0b1abb7b1e",
+  "service": "cass",
+  "team": "cass-platform",
+  "author_id": "eng-cass-01",
+  "terminal_outcome": "ACCEPTED"
+}
+```
+
+Behavior summary:
+
+- Backend prefers explicit telemetry ownership fields when provided.
+- If explicit ownership is missing, backend resolves from config lookup.
+- In Docker, mount a config file and set `TEAM_CONFIG_PATH` for deterministic enrichment.
 
 ## Model Catalog Workflow
 

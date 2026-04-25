@@ -110,7 +110,16 @@ class SignalCodeAgentDialog(
                         },
                         BorderLayout.NORTH
                     )
-                    add(JLabel("Plan code changes before applying them."), BorderLayout.SOUTH)
+                    add(JLabel("Plan code changes before applying them."), BorderLayout.CENTER)
+                    add(
+                        JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
+                            val teamText = context.team?.trim().takeUnless { it.isNullOrEmpty() } ?: "unassigned"
+                            val authorText = context.authorId?.trim().takeUnless { it.isNullOrEmpty() } ?: "n/a"
+                            add(JLabel("Team: $teamText"))
+                            add(JLabel("Author: $authorText"))
+                        },
+                        BorderLayout.SOUTH
+                    )
                 },
                 BorderLayout.WEST
             )

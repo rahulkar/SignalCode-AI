@@ -9,7 +9,9 @@ export const generateRequestSchema = z.object({
     projectRootPath: z.string().min(1).optional(),
     targetFilePath: z.string().min(1).optional(),
     selectionOrCaretSnippet: z.string(),
-    languageId: z.string().optional()
+    languageId: z.string().optional(),
+    team: z.string().min(1).optional(),
+    author_id: z.string().min(1).optional()
   })
 });
 

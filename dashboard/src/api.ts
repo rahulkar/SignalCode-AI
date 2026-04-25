@@ -26,6 +26,8 @@ export interface StatsResponse {
     outcome: EventOutcome;
     task_id: string;
     diff_id: string;
+    team: string | null;
+    author_id: string | null;
   }>;
   postAccept: {
     editedTaskRate: number;
@@ -53,6 +55,8 @@ export interface PostAcceptTaskReworkRow {
   taskId: string;
   promptSnippet: string;
   model: string;
+  team: string | null;
+  author_id: string | null;
   firstAcceptedAt: string;
   firstEditedAt: string;
   secondsToFirstEdit: number;
@@ -91,10 +95,18 @@ export interface ExportChangeSnapshotsResponse {
   records: ExportChangeSnapshotRow[];
 }
 
+export interface TeamOptionsResponse {
+  teams: string[];
+}
+
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
-export async function fetchStats(range: StatsRange): Promise<StatsResponse> {
-  const response = await fetch(`${apiBaseUrl}/api/stats?range=${encodeURIComponent(range)}`);
+export async function fetchStats(range: StatsRange, team: string | null = null): Promise<StatsResponse> {
+  const params = new URLSearchParams({ range });
+  if (team) {
+    params.set("team", team);
+  }
+  const response = await fetch(`${apiBaseUrl}/api/stats?${params.toString()}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch stats: ${response.status}`);
   }
@@ -133,18 +145,36 @@ export async function fetchIdeEvents(): Promise<{ events: IdeMonitorEvent[] }> {
   return (await response.json()) as { events: IdeMonitorEvent[] };
 }
 
-export async function fetchPostAcceptTaskRework(): Promise<{ rows: PostAcceptTaskReworkRow[] }> {
-  const response = await fetch(`${apiBaseUrl}/api/stats/post-accept-tasks`);
+export async function fetchPostAcceptTaskRework(team: string | null = null): Promise<{ rows: PostAcceptTaskReworkRow[] }> {
+  const params = new URLSearchParams();
+  if (team) {
+    params.set("team", team);
+  }
+  const suffix = params.toString();
+  const response = await fetch(`${apiBaseUrl}/api/stats/post-accept-tasks${suffix ? `?${suffix}` : ""}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch post-accept task rework: ${response.status}`);
   }
   return (await response.json()) as { rows: PostAcceptTaskReworkRow[] };
 }
 
-export async function fetchExportChangeSnapshots(): Promise<ExportChangeSnapshotsResponse> {
-  const response = await fetch(`${apiBaseUrl}/api/export/pr-snapshots`);
+export async function fetchExportChangeSnapshots(team: string | null = null): Promise<ExportChangeSnapshotsResponse> {
+  const params = new URLSearchParams();
+  if (team) {
+    params.set("team", team);
+  }
+  const suffix = params.toString();
+  const response = await fetch(`${apiBaseUrl}/api/export/pr-snapshots${suffix ? `?${suffix}` : ""}`);
   if (!response.ok) {
     throw new Error(`Failed to export change snapshots: ${response.status}`);
   }
   return (await response.json()) as ExportChangeSnapshotsResponse;
+}
+
+export async function fetchTeams(): Promise<TeamOptionsResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/teams`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch teams: ${response.status}`);
+  }
+  return (await response.json()) as TeamOptionsResponse;
 }

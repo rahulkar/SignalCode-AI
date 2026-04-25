@@ -8,6 +8,7 @@ import {
   fetchIdeEvents,
   fetchPostAcceptTaskRework,
   fetchStats,
+  fetchTeams,
   resetTelemetry,
   type IdeActivityResponse,
   type IdeMonitorEvent,
@@ -41,6 +42,8 @@ export function App() {
   const [timeRange, setTimeRange] = useState<StatsRange>("24h");
   const [query, setQuery] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState<"ALL" | "ACCEPTED" | "REJECTED" | "ITERATED" | "DIFF_RENDERED">("ALL");
+  const [teamFilter, setTeamFilter] = useState<string>("ALL");
+  const [teamOptions, setTeamOptions] = useState<string[]>(["ALL"]);
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => {
@@ -48,13 +51,15 @@ export function App() {
     return stored === "dark" ? "dark" : "light";
   });
 
-  const load = async (range: StatsRange) => {
-    const [statsRes, healthRes, ideRes, ideEventsRes, postAcceptRes] = await Promise.allSettled([
-      fetchStats(range),
+  const load = async (range: StatsRange, selectedTeam: string) => {
+    const teamParam = selectedTeam === "ALL" ? null : selectedTeam;
+    const [statsRes, healthRes, ideRes, ideEventsRes, postAcceptRes, teamsRes] = await Promise.allSettled([
+      fetchStats(range, teamParam),
       fetchHealth(),
       fetchIdeActivity(),
       fetchIdeEvents(),
-      fetchPostAcceptTaskRework()
+      fetchPostAcceptTaskRework(teamParam),
+      fetchTeams()
     ]);
 
     if (statsRes.status === "fulfilled") {
@@ -81,20 +86,30 @@ export function App() {
     } else {
       setPostAcceptRows([]);
     }
+    if (teamsRes.status === "fulfilled") {
+      const teams = ["ALL", ...teamsRes.value.teams.filter((team) => team.trim().length > 0)];
+      const uniqueTeams = [...new Set(teams)];
+      setTeamOptions(uniqueTeams);
+      if (!uniqueTeams.includes(selectedTeam)) {
+        setTeamFilter("ALL");
+      }
+    } else {
+      setTeamOptions(["ALL"]);
+    }
 
     setIsLoading(false);
   };
 
   useEffect(() => {
     setIsLoading(true);
-    void load(timeRange);
-  }, [timeRange]);
+    void load(timeRange, teamFilter);
+  }, [timeRange, teamFilter]);
 
   useEffect(() => {
     if (autoRefreshMs === 0) return;
-    const timer = window.setInterval(() => void load(timeRange), autoRefreshMs);
+    const timer = window.setInterval(() => void load(timeRange, teamFilter), autoRefreshMs);
     return () => window.clearInterval(timer);
-  }, [autoRefreshMs, timeRange]);
+  }, [autoRefreshMs, teamFilter, timeRange]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -141,7 +156,7 @@ export function App() {
     if (!ok) return;
     try {
       await resetTelemetry();
-      await load(timeRange);
+      await load(timeRange, teamFilter);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to clear database");
     }
@@ -150,7 +165,7 @@ export function App() {
   const onExportChangeSnapshots = async () => {
     try {
       setIsExporting(true);
-      const payload = await fetchExportChangeSnapshots();
+      const payload = await fetchExportChangeSnapshots(teamFilter === "ALL" ? null : teamFilter);
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const objectUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -185,6 +200,7 @@ export function App() {
                 <strong>{isDark ? "Midnight" : "Daybreak"}</strong>
               </button>
               <InfoChip icon="window" label="Window" value={timeRange.toUpperCase()} />
+              <InfoChip icon="tasks" label="Team" value={teamFilter} />
               <InfoChip icon="refresh" label="Refresh" value={autoRefreshMs === 0 ? "Manual" : `${autoRefreshMs / 1000}s`} />
               <InfoChip icon="sync" label="Last Sync" value={formatLastSync(lastLoadedAt)} />
             </div>
@@ -282,9 +298,12 @@ export function App() {
               onTimeRangeChange={setTimeRange}
               query={query}
               onQueryChange={setQuery}
+              teamFilter={teamFilter}
+              teamOptions={teamOptions}
+              onTeamFilterChange={setTeamFilter}
               outcomeFilter={outcomeFilter}
               onOutcomeFilterChange={setOutcomeFilter}
-              onRefresh={() => void load(timeRange)}
+              onRefresh={() => void load(timeRange, teamFilter)}
               onExportChangeSnapshots={() => void onExportChangeSnapshots()}
               isExporting={isExporting}
               onResetDatabase={() => void onResetDatabase()}

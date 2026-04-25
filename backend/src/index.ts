@@ -7,6 +7,7 @@ import { normalizeAgentOperation } from "./agentPlan.js";
 import { db, initializeDb, resetTelemetryDb } from "./db.js";
 import { fetchAvailableModelIds, generateAgentPlanText } from "./litellm.js";
 import { defaultModel as generatedDefaultModel, supportedModels } from "./modelCatalog.generated.js";
+import { listConfiguredTeams, resolveOwnershipContext } from "./ownership.js";
 import { generateRequestSchema, telemetryRequestSchema } from "./schemas.js";
 import type {
   ExportChangeSnapshotRow,
@@ -18,6 +19,7 @@ import type {
   RecentActivityRow,
   StatsRange,
   StatsResponse,
+  TeamOptionsResponse,
   TelemetryRequest,
   TimeSeriesPoint
 } from "./types.js";
@@ -36,7 +38,16 @@ type ListModelsFn = typeof fetchAvailableModelIds;
 type SupportedModel = (typeof supportedModels)[number];
 type RangeConfig = { windowMs: number; bucketMs: number };
 type TimeSeriesRow = { created_at: string; type: "DIFF_RENDERED" | "ACCEPTED" | "REJECTED" | "ITERATED" };
-type ExportTaskRow = { task_id: string; prompt_snippet: string; model: string; created_at: string };
+type ExportTaskRow = {
+  task_id: string;
+  prompt_snippet: string;
+  model: string;
+  project_root_path: string | null;
+  service: string | null;
+  team: string | null;
+  author_id: string | null;
+  created_at: string;
+};
 type ExportEventRow = {
   task_id: string;
   diff_id: string;
@@ -63,6 +74,7 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
 
   app.use(cors({ origin: corsOrigin }));
   app.use(express.json({ limit: "1mb" }));
+  backfillOwnershipFromHistoricalEvents();
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
@@ -114,6 +126,15 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   const diffId = crypto.randomUUID();
   const now = new Date().toISOString();
   const promptSnippet = prompt.slice(0, 120);
+  const ownershipFilePaths = [context.targetFilePath, context.filePath].filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0
+  );
+  const derivedTaskService = deriveServiceName(ownershipFilePaths);
+  const taskOwnership = resolveOwnershipContext(ownershipFilePaths, derivedTaskService, context.projectRootPath ?? null);
+  const explicitTeam = normalizeOptionalString(context.team);
+  const explicitAuthorId = normalizeOptionalString(context.author_id);
+  const resolvedTeam = explicitTeam ?? taskOwnership.team;
+  const resolvedAuthorId = explicitAuthorId ?? taskOwnership.authorId;
 
   try {
     let effectiveModel: SupportedModel = requestedModel;
@@ -167,9 +188,18 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
     }
 
     db.prepare(
-      `INSERT INTO tasks (task_id, prompt_snippet, model, status, created_at)
-       VALUES (?, ?, ?, 'SUCCEEDED', ?)`
-    ).run(taskId, promptSnippet, effectiveModel, now);
+      `INSERT INTO tasks (task_id, prompt_snippet, model, project_root_path, service, team, author_id, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'SUCCEEDED', ?)`
+    ).run(
+      taskId,
+      promptSnippet,
+      effectiveModel,
+      context.projectRootPath ?? null,
+      taskOwnership.service,
+      resolvedTeam,
+      resolvedAuthorId,
+      now
+    );
 
     const response: GenerateResponse = {
       task_id: taskId,
@@ -206,9 +236,31 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
     const source = typeof body.meta?.source === "string" ? body.meta.source : null;
     if (source === "ide-monitor") {
       db.prepare(
-        `INSERT OR IGNORE INTO tasks (task_id, prompt_snippet, model, status, created_at)
-         VALUES (?, ?, ?, 'SUCCEEDED', ?)`
-      ).run(body.task_id, "IDE monitor event", "ide-monitor", timestamp);
+        `INSERT OR IGNORE INTO tasks (task_id, prompt_snippet, model, project_root_path, status, created_at)
+         VALUES (?, ?, ?, ?, 'SUCCEEDED', ?)`
+      ).run(body.task_id, "IDE monitor event", "ide-monitor", null, timestamp);
+    }
+
+    const filePath = getMetaString(body.meta, "filePath");
+    const telemetryPaths = filePath ? [filePath] : [];
+    const derivedService = filePath ? deriveServiceName(telemetryPaths) : null;
+    const explicitTeam = normalizeOptionalString(getMetaString(body.meta, "team"));
+    const explicitAuthorId = normalizeOptionalString(
+      getMetaString(body.meta, "author_id") ?? getMetaString(body.meta, "authorId")
+    );
+    const projectRootPath = db
+      .prepare(`SELECT project_root_path FROM tasks WHERE task_id = ?`)
+      .get(body.task_id) as { project_root_path: string | null } | undefined;
+    const ownership = resolveOwnershipContext(telemetryPaths, derivedService, projectRootPath?.project_root_path ?? null);
+    if (ownership.service || explicitTeam || explicitAuthorId || ownership.team || ownership.authorId) {
+      db.prepare(
+        `UPDATE tasks
+         SET
+           service = COALESCE(service, ?),
+           team = COALESCE(?, team, ?),
+           author_id = COALESCE(?, author_id, ?)
+         WHERE task_id = ?`
+      ).run(ownership.service, explicitTeam, ownership.team, explicitAuthorId, ownership.authorId, body.task_id);
     }
 
     const result = db.prepare(
@@ -227,17 +279,40 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   }
   });
 
-  app.get("/api/export/pr-snapshots", (_req, res) => {
+  app.get("/api/teams", (_req, res) => {
+    const observedRows = db
+      .prepare(
+        `SELECT DISTINCT team
+         FROM tasks
+         WHERE team IS NOT NULL
+           AND TRIM(team) != ''
+         ORDER BY team ASC`
+      )
+      .all() as Array<{ team: string }>;
+
+    const observed = observedRows.map((row) => row.team);
+    const configured = listConfiguredTeams();
+    const teams = [...new Set([...configured, ...observed])].sort((left, right) => left.localeCompare(right));
+    const response: TeamOptionsResponse = { teams };
+    res.json(response);
+  });
+
+  app.get("/api/export/pr-snapshots", (req, res) => {
+    const teamFilter = parseTeamFilter(req.query.team);
+    const teamWhereSql = teamFilter ? " AND t.team = ? " : "";
+    const teamArgs = teamFilter ? [teamFilter] : [];
+
     const taskRows = db
       .prepare(
-        `SELECT DISTINCT t.task_id, t.prompt_snippet, t.model, t.created_at
+        `SELECT DISTINCT t.task_id, t.prompt_snippet, t.model, t.project_root_path, t.service, t.team, t.author_id, t.created_at
          FROM tasks t
          INNER JOIN events e ON e.task_id = t.task_id
          WHERE t.status = 'SUCCEEDED'
            AND t.model != 'ide-monitor'
+           ${teamWhereSql}
          ORDER BY t.created_at DESC`
       )
-      .all() as ExportTaskRow[];
+      .all(...teamArgs) as ExportTaskRow[];
 
     const eventRows = db
       .prepare(
@@ -246,9 +321,10 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
          INNER JOIN tasks t ON t.task_id = e.task_id
          WHERE t.status = 'SUCCEEDED'
            AND t.model != 'ide-monitor'
+           ${teamWhereSql}
          ORDER BY e.created_at ASC`
       )
-      .all() as ExportEventRow[];
+      .all(...teamArgs) as ExportEventRow[];
 
     const eventsByTask = new Map<string, ExportEventRow[]>();
     for (const event of eventRows) {
@@ -274,6 +350,9 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   app.get("/api/stats", (req, res) => {
   const postAcceptExclusion = `COALESCE(e.metadata, '') NOT LIKE '%"source":"post-accept"%'`;
   const range = parseStatsRange(req.query.range);
+  const teamFilter = parseTeamFilter(req.query.team);
+  const teamWhereSql = teamFilter ? " AND t.team = ? " : "";
+  const teamArgs = teamFilter ? [teamFilter] : [];
   const rangeConfig = STATS_RANGE_CONFIG[range];
   const rangeStartIso = new Date(Date.now() - rangeConfig.windowMs).toISOString();
 
@@ -287,13 +366,20 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
        FROM events e
        INNER JOIN tasks t ON t.task_id = e.task_id
        WHERE t.model != 'ide-monitor'
+         ${teamWhereSql}
          AND ${postAcceptExclusion}`
     )
-    .get() as { diffRendered: number | null; accepted: number | null; rejected: number | null; iterated: number | null };
+    .get(...teamArgs) as { diffRendered: number | null; accepted: number | null; rejected: number | null; iterated: number | null };
 
   const totalTasksRow = db
-    .prepare(`SELECT COUNT(DISTINCT task_id) AS totalTasks FROM tasks WHERE status = 'SUCCEEDED' AND model != 'ide-monitor'`)
-    .get() as { totalTasks: number };
+    .prepare(
+      `SELECT COUNT(DISTINCT task_id) AS totalTasks
+       FROM tasks
+       WHERE status = 'SUCCEEDED'
+         AND model != 'ide-monitor'
+         ${teamFilter ? " AND team = ? " : ""}`
+    )
+    .get(...teamArgs) as { totalTasks: number };
 
   const avgIterationsRow = db
     .prepare(
@@ -303,6 +389,7 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
          INNER JOIN tasks t ON t.task_id = e.task_id
          WHERE type = 'ACCEPTED'
            AND t.model != 'ide-monitor'
+           ${teamWhereSql}
            AND ${postAcceptExclusion}
          GROUP BY e.task_id
        ),
@@ -321,7 +408,7 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
        SELECT COALESCE(AVG(iteration_count), 0) AS avgIterations
        FROM iterations_before_accept`
     )
-    .get() as { avgIterations: number };
+    .get(...teamArgs) as { avgIterations: number };
 
   const timeSeries = db
     .prepare(
@@ -331,11 +418,12 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
        FROM events e
        INNER JOIN tasks t ON t.task_id = e.task_id
        WHERE t.model != 'ide-monitor'
+         ${teamWhereSql}
          AND ${postAcceptExclusion}
          AND e.created_at >= ?
        ORDER BY e.created_at ASC`
     )
-    .all(rangeStartIso) as TimeSeriesRow[];
+    .all(...teamArgs, rangeStartIso) as TimeSeriesRow[];
 
   const recentActivity = db
     .prepare(
@@ -345,16 +433,19 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
          t.model AS model,
          e.type AS outcome,
          e.task_id AS task_id,
-         e.diff_id AS diff_id
+         e.diff_id AS diff_id,
+         t.team AS team,
+         t.author_id AS author_id
        FROM events e
        INNER JOIN tasks t ON t.task_id = e.task_id
        WHERE t.model != 'ide-monitor'
+         ${teamWhereSql}
          AND ${postAcceptExclusion}
          AND e.created_at >= ?
        ORDER BY e.created_at DESC
        LIMIT 40`
     )
-    .all(rangeStartIso) as RecentActivityRow[];
+    .all(...teamArgs, rangeStartIso) as RecentActivityRow[];
 
   const diffRendered = totals.diffRendered ?? 0;
   const accepted = totals.accepted ?? 0;
@@ -368,9 +459,10 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
        INNER JOIN tasks t ON t.task_id = e.task_id
        WHERE e.type = 'ACCEPTED'
          AND t.model != 'ide-monitor'
+         ${teamWhereSql}
        ORDER BY e.created_at ASC`
     )
-    .all() as Array<{ task_id: string; created_at: string }>;
+    .all(...teamArgs) as Array<{ task_id: string; created_at: string }>;
 
   const postAcceptRows = db
     .prepare(
@@ -547,21 +639,35 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
     res.json({ events });
   });
 
-  app.get("/api/stats/post-accept-tasks", (_req, res) => {
+  app.get("/api/stats/post-accept-tasks", (req, res) => {
+    const teamFilter = parseTeamFilter(req.query.team);
+    const teamWhereSql = teamFilter ? " AND t.team = ? " : "";
+    const teamArgs = teamFilter ? [teamFilter] : [];
+
     const acceptedRows = db
       .prepare(
         `SELECT
            e.task_id AS task_id,
            MIN(e.created_at) AS firstAcceptedAt,
            t.prompt_snippet AS promptSnippet,
-           t.model AS model
+           t.model AS model,
+           t.team AS team,
+           t.author_id AS author_id
          FROM events e
          INNER JOIN tasks t ON t.task_id = e.task_id
          WHERE e.type = 'ACCEPTED'
            AND t.model != 'ide-monitor'
+           ${teamWhereSql}
          GROUP BY e.task_id`
       )
-      .all() as Array<{ task_id: string; firstAcceptedAt: string; promptSnippet: string; model: string }>;
+      .all(...teamArgs) as Array<{
+        task_id: string;
+        firstAcceptedAt: string;
+        promptSnippet: string;
+        model: string;
+        team: string | null;
+        author_id: string | null;
+      }>;
 
     const postAcceptRows = db
       .prepare(
@@ -575,7 +681,13 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
     const acceptedByTask = new Map(
       acceptedRows.map((row) => [
         row.task_id,
-        { acceptedAt: row.firstAcceptedAt, promptSnippet: row.promptSnippet, model: row.model }
+        {
+          acceptedAt: row.firstAcceptedAt,
+          promptSnippet: row.promptSnippet,
+          model: row.model,
+          team: row.team,
+          authorId: row.author_id
+        }
       ])
     );
 
@@ -632,6 +744,8 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
           taskId,
           promptSnippet: accepted.promptSnippet,
           model: accepted.model,
+          team: accepted.team,
+          author_id: accepted.authorId,
           firstAcceptedAt: accepted.acceptedAt,
           firstEditedAt: aggregate.firstEditedAt,
           secondsToFirstEdit: Number(Math.max(secondsToFirstEdit, 0).toFixed(1)),
@@ -650,6 +764,77 @@ export function createApp(deps?: { generateFn?: GenerateFn; listModelsFn?: ListM
   });
 
   return app;
+}
+
+function backfillOwnershipFromHistoricalEvents(): void {
+  const rows = db
+    .prepare(
+      `SELECT t.task_id, t.project_root_path, t.service, e.metadata
+       FROM tasks t
+       INNER JOIN events e ON e.task_id = t.task_id
+       WHERE t.model != 'ide-monitor'
+         AND (t.service IS NULL OR t.team IS NULL OR t.author_id IS NULL)
+       ORDER BY e.created_at ASC`
+    )
+    .all() as Array<{ task_id: string; project_root_path: string | null; service: string | null; metadata: string | null }>;
+
+  const pathsByTask = new Map<
+    string,
+    {
+      projectRootPath: string | null;
+      service: string | null;
+      filePaths: string[];
+      team: string | null;
+      authorId: string | null;
+    }
+  >();
+  for (const row of rows) {
+    const meta = parseMeta(row.metadata);
+    const filePath = getMetaString(meta, "filePath");
+    const metaTeam = normalizeOptionalString(getMetaString(meta, "team"));
+    const metaAuthorId = normalizeOptionalString(getMetaString(meta, "author_id") ?? getMetaString(meta, "authorId"));
+    const current = pathsByTask.get(row.task_id);
+    if (!current) {
+      pathsByTask.set(row.task_id, {
+        projectRootPath: row.project_root_path,
+        service: row.service,
+        filePaths: filePath ? [filePath] : [],
+        team: metaTeam,
+        authorId: metaAuthorId
+      });
+      continue;
+    }
+    if (filePath) {
+      current.filePaths.push(filePath);
+    }
+    if (!current.projectRootPath && row.project_root_path) {
+      current.projectRootPath = row.project_root_path;
+    }
+    if (!current.team && metaTeam) {
+      current.team = metaTeam;
+    }
+    if (!current.authorId && metaAuthorId) {
+      current.authorId = metaAuthorId;
+    }
+  }
+
+  for (const [taskId, context] of pathsByTask.entries()) {
+    const derivedService = deriveServiceName(context.filePaths);
+    const ownership = resolveOwnershipContext(context.filePaths, context.service ?? derivedService, context.projectRootPath);
+    const resolvedTeam = context.team ?? ownership.team;
+    const resolvedAuthorId = context.authorId ?? ownership.authorId;
+    if (!ownership.service && !resolvedTeam && !resolvedAuthorId) {
+      continue;
+    }
+    db.prepare(
+      `UPDATE tasks
+       SET
+         service = COALESCE(service, ?),
+         team = COALESCE(team, ?),
+         author_id = COALESCE(author_id, ?)
+       WHERE task_id = ?`
+    ).run(ownership.service, resolvedTeam, resolvedAuthorId, taskId);
+  }
 }
 
 function parseMeta(metadata: string | null): Record<string, unknown> {
@@ -672,6 +857,18 @@ function buildExportSnapshot(task: ExportTaskRow, events: ExportEventRow[]): Exp
   const latestPostAccept = postAcceptEvents.at(-1);
 
   const filePaths = [...new Set(enrichedEvents.map((event) => getMetaString(event.meta, "filePath")).filter((value): value is string => Boolean(value)))];
+  const derivedService = deriveServiceName(filePaths);
+  const ownership = resolveOwnershipContext(filePaths, task.service ?? derivedService, task.project_root_path);
+  const teamFromEvents =
+    normalizeOptionalString(getMetaString(firstRendered?.meta, "team")) ??
+    normalizeOptionalString(getMetaString(firstAccepted?.meta, "team")) ??
+    normalizeOptionalString(getMetaString(latestPostAccept?.meta, "team"));
+  const authorFromEvents =
+    normalizeOptionalString(getMetaString(firstRendered?.meta, "author_id") ?? getMetaString(firstRendered?.meta, "authorId")) ??
+    normalizeOptionalString(getMetaString(firstAccepted?.meta, "author_id") ?? getMetaString(firstAccepted?.meta, "authorId")) ??
+    normalizeOptionalString(
+      getMetaString(latestPostAccept?.meta, "author_id") ?? getMetaString(latestPostAccept?.meta, "authorId")
+    );
   const submittedAt = firstRendered?.created_at ?? task.created_at;
   const mergedAt = firstAccepted?.created_at ?? null;
   const terminalOutcome: ExportChangeSnapshotRow["terminal_outcome"] = firstAccepted
@@ -702,9 +899,9 @@ function buildExportSnapshot(task: ExportTaskRow, events: ExportEventRow[]): Exp
 
   return {
     pr_id: task.task_id,
-    service: deriveServiceName(filePaths),
-    team: null,
-    author_id: null,
+    service: task.service ?? ownership.service ?? derivedService,
+    team: teamFromEvents ?? task.team ?? ownership.team,
+    author_id: authorFromEvents ?? task.author_id ?? ownership.authorId,
     submitted_at: submittedAt,
     merged_at: mergedAt,
     total_lines_added_at_submission: submissionLines,
@@ -829,6 +1026,25 @@ function parseStatsRange(value: unknown): StatsRange {
     return value;
   }
   return "24h";
+}
+
+function parseTeamFilter(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.toUpperCase() === "ALL") {
+    return null;
+  }
+  return normalized;
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function isEventOnOrAfterAcceptance(eventTimestamp: string, acceptedTimestamp: string): boolean {

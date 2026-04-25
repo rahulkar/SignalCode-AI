@@ -14,6 +14,7 @@ Primary goal of the current architecture:
 
 - capture generation review outcomes and post-accept rework signals
 - surface these signals as operational analytics in near real time
+- enrich each task with ownership (`team`, `author_id`) for scoped analytics and export
 
 ## 2. High-Level Component Diagram
 
@@ -45,6 +46,7 @@ Core responsibilities:
 - persist telemetry events
 - compute aggregate and per-task analytics
 - provide export snapshots for downstream analysis
+- resolve and persist team/author ownership for tasks and events
 
 Key files:
 
@@ -61,6 +63,7 @@ SQLite tables:
 - `tasks`
   - one row per generation task (or monitor task)
   - includes status, model, prompt snippet, timestamps
+  - includes `project_root_path`, `service`, `team`, `author_id`
 - `events`
   - append-only event stream keyed by `task_id`
   - event types: `DIFF_RENDERED`, `ACCEPTED`, `REJECTED`, `ITERATED`
@@ -70,6 +73,12 @@ Telemetry sources encoded in metadata:
 
 - `source: "ide-monitor"` for IDE activity events
 - `source: "post-accept"` for post-accept rework events
+
+Ownership sources encoded in metadata/context:
+
+- generate context may include `team` and `author_id`
+- telemetry metadata may include `team` and `author_id`
+- backend can also resolve via `team.json` / `teams.json`
 
 ## 5. Plugin Architecture
 
@@ -81,6 +90,7 @@ Core parts:
 - telemetry startup activity and listeners
 - demo orchestrator for scripted live runs
 - post-accept tracker for baseline vs current file comparison
+- ownership resolver (`team.json`/`teams.json`) surfaced in plugin header
 
 Event capture paths:
 
@@ -105,6 +115,7 @@ Primary API dependencies:
 
 - `/api/stats`
 - `/api/stats/post-accept-tasks`
+- `/api/teams`
 - `/api/ide/activity`
 - `/api/ide/events`
 - `/api/export/pr-snapshots`
@@ -131,6 +142,18 @@ Primary API dependencies:
 4. Backend aggregates first edit time and max delta metrics per task.
 5. Dashboard surfaces post-accept edit rate and largest rework tasks.
 
+### 7.3 Ownership Enrichment Flow (`team`, `author_id`)
+
+1. Plugin resolves ownership from nearest project `team.json` / `teams.json`.
+2. Plugin includes ownership in generate context and telemetry metadata.
+3. Backend persists ownership on `tasks` during generate and telemetry ingestion.
+4. Backend fallback resolution order:
+   - explicit metadata/context ownership
+   - configured path (`TEAM_CONFIG_PATH` / `TEAMS_CONFIG_PATH`)
+   - nearest config from file path and `projectRootPath`
+   - default cwd-relative config lookup
+5. Export and stats endpoints use persisted ownership for team filtering and reporting.
+
 ## 8. Deployment Topology (Local Dev)
 
 - LiteLLM: `http://localhost:4000`
@@ -140,6 +163,11 @@ Primary API dependencies:
 
 The plugin is configured to emit to local backend by default in this setup.
 
+Docker note:
+
+- backend container cannot directly read host IDE paths unless mounted
+- for deterministic ownership in Docker, mount config and set `TEAM_CONFIG_PATH`
+
 ## 9. Current Scope Boundaries
 
 Implemented today:
@@ -147,6 +175,8 @@ Implemented today:
 - task/event telemetry analytics around plugin-driven generation lifecycle
 - post-accept edit tracking and ranking
 - PR-style export derived from telemetry metadata
+- ownership-aware analytics and exports (`team`, `author_id`)
+- plugin header ownership visibility (`Team`, `Author`)
 
 Not implemented as first-class architecture yet:
 
@@ -164,3 +194,13 @@ Recommended next architecture increments:
 3. Add merge-comparison stage to compute survival/rewrite outcomes.
 4. Add ownership joins (`team`, `service`, `author`) and weekly rollups.
 5. Keep current plugin telemetry as a complementary, high-frequency signal layer.
+
+## 11. Example Scenarios
+
+- `cass` ownership reporting:
+  - `team.json` in project root:
+    - `team: cass-platform`
+    - `author_id: eng-cass-01`
+  - resulting exports include non-null ownership for `cass` tasks
+- Team-sliced analytics:
+  - dashboard/team API filters isolate acceptance and rework behavior per team

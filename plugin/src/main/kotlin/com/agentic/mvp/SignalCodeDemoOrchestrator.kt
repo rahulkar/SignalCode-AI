@@ -153,6 +153,7 @@ class SignalCodeDemoOrchestrator(
         log("Preparing request context for ${step.primaryFileForLog()}...")
         val contextFilePath = resolveContextFile(projectRoot, seedPath, step)
         val selectionSnippet = buildSelectionSnippet(projectRoot, step)
+        val ownership = TeamOwnershipResolver.resolve(contextFilePath.toString(), projectRoot.toString())
         val request = GenerateRequest(
             prompt = step.prompt,
             model = model,
@@ -162,7 +163,9 @@ class SignalCodeDemoOrchestrator(
                 projectRootPath = projectRoot.toString(),
                 targetFilePath = step.targetFilePath,
                 selectionOrCaretSnippet = selectionSnippet,
-                languageId = step.languageId
+                languageId = step.languageId,
+                team = ownership.team,
+                author_id = ownership.authorId
             )
         )
 
@@ -186,7 +189,7 @@ class SignalCodeDemoOrchestrator(
 
         val operation = response.operation
         val previewMetrics = buildPreviewMetrics(projectRoot, contextFilePath, operation)
-        val baseMeta = buildDemoMeta(step, contextFilePath, selectionSnippet.length, operation, response.usage)
+        val baseMeta = buildDemoMeta(step, contextFilePath, selectionSnippet.length, operation, response.usage, ownership)
         progress(
             DemoProgressEvent.StepPhase(
                 stepIndex,
@@ -392,7 +395,8 @@ class SignalCodeDemoOrchestrator(
         contextFilePath: Path,
         contextChars: Int,
         operation: AgentOperation,
-        usage: UsageMetrics?
+        usage: UsageMetrics?,
+        ownership: TeamOwnership
     ): Map<String, Any> {
         val generatedText = when (operation.kind) {
             "replace_range" -> operation.replace.orEmpty()
@@ -414,7 +418,7 @@ class SignalCodeDemoOrchestrator(
             "generatedChars" to generatedText.length,
             "generatedLines" to demoLineCount(generatedText),
             "targetFileProvided" to !step.targetFilePath.isNullOrBlank()
-        ) + usage.toUsageMeta()
+        ) + ownership.toMeta() + usage.toUsageMeta()
     }
 
     private fun buildPreviewMetrics(

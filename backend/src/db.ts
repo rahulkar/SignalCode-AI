@@ -12,6 +12,10 @@ export function initializeDb(): void {
       task_id TEXT PRIMARY KEY,
       prompt_snippet TEXT NOT NULL,
       model TEXT NOT NULL,
+      project_root_path TEXT,
+      service TEXT,
+      team TEXT,
+      author_id TEXT,
       status TEXT NOT NULL DEFAULT 'SUCCEEDED' CHECK(status IN ('SUCCEEDED', 'FAILED')),
       created_at TEXT NOT NULL
     );
@@ -40,6 +44,38 @@ export function initializeDb(): void {
       ADD COLUMN status TEXT NOT NULL DEFAULT 'SUCCEEDED' CHECK(status IN ('SUCCEEDED', 'FAILED'));
     `);
   }
+
+  if (!taskColumns.some((column) => column.name === "service")) {
+    db.exec(`
+      ALTER TABLE tasks
+      ADD COLUMN service TEXT;
+    `);
+  }
+
+  if (!taskColumns.some((column) => column.name === "project_root_path")) {
+    db.exec(`
+      ALTER TABLE tasks
+      ADD COLUMN project_root_path TEXT;
+    `);
+  }
+
+  if (!taskColumns.some((column) => column.name === "team")) {
+    db.exec(`
+      ALTER TABLE tasks
+      ADD COLUMN team TEXT;
+    `);
+  }
+
+  if (!taskColumns.some((column) => column.name === "author_id")) {
+    db.exec(`
+      ALTER TABLE tasks
+      ADD COLUMN author_id TEXT;
+    `);
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_team ON tasks(team);
+  `);
 }
 
 export function resetTelemetryDb(): void {
