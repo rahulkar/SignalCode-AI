@@ -2,6 +2,7 @@ package com.signalcode.mvp
 
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
@@ -14,6 +15,7 @@ import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.util.concurrency.AppExecutorUtil
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -81,6 +83,8 @@ private class IdeTelemetryEmitter(
 ) {
     private val editLastSentAt = ConcurrentHashMap<String, Long>()
     private val monitorTaskId = "ide-monitor-${project.locationHash}"
+    private val windowsCaseInsensitivePaths =
+        System.getProperty("os.name").contains("win", ignoreCase = true)
 
     fun emitHeartbeat() {
         emitWithMeta(
@@ -146,10 +150,29 @@ private class IdeTelemetryEmitter(
     }
 
     private fun readCurrentText(filePath: String): String? {
-        val localFileSystem = LocalFileSystem.getInstance()
-        val virtualFile = localFileSystem.findFileByPath(filePath) ?: localFileSystem.refreshAndFindFileByPath(filePath)
-        if (virtualFile != null) {
-            FileDocumentManager.getInstance().getDocument(virtualFile)?.let { return it.text }
+        val openDocumentText = ReadAction.compute<String?, RuntimeException> {
+            val fileDocumentManager = FileDocumentManager.getInstance()
+            val localFileSystem = LocalFileSystem.getInstance()
+            val virtualFile = localFileSystem.findFileByPath(filePath)
+            val directDocument = virtualFile?.let {
+                fileDocumentManager.getCachedDocument(it) ?: fileDocumentManager.getDocument(it)
+            }
+            if (directDocument != null) {
+                return@compute directDocument.text
+            }
+
+            val normalizedTargetPath = normalizeForPathLookup(filePath)
+            fileDocumentManager.unsavedDocuments.firstNotNullOfOrNull { document ->
+                val unsavedFile = fileDocumentManager.getFile(document) ?: return@firstNotNullOfOrNull null
+                if (normalizeForPathLookup(unsavedFile.path) == normalizedTargetPath) {
+                    document.text
+                } else {
+                    null
+                }
+            }
+        }
+        if (openDocumentText != null) {
+            return openDocumentText
         }
 
         return runCatching {
@@ -162,5 +185,14 @@ private class IdeTelemetryEmitter(
                 null
             }
         }.getOrNull()
+    }
+
+    private fun normalizeForPathLookup(path: String): String {
+        val slashNormalized = path.replace('\\', '/').trim()
+        return if (windowsCaseInsensitivePaths) {
+            slashNormalized.lowercase(Locale.ROOT)
+        } else {
+            slashNormalized
+        }
     }
 }
