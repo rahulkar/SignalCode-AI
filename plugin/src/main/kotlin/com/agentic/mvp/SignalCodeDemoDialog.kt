@@ -104,7 +104,7 @@ class SignalCodeDemoDialog(
             add(
                 JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                     add(chip("Model: $selectedModel", SignalCodeIcons.ModeModel))
-                    add(chip("Real backend", SignalCodeIcons.Agent))
+                    add(chip("Real backend", SignalCodeIcons.Backend))
                     add(chip("Telemetry on", SignalCodeIcons.Dashboard))
                 },
                 BorderLayout.EAST

@@ -5,6 +5,7 @@ import javax.swing.Icon
 
 object SignalCodeIcons {
     val Agent: Icon = IconLoader.getIcon("/META-INF/pluginIcon.svg", SignalCodeIcons::class.java)
+    val Backend: Icon = IconLoader.getIcon("/icons/backend.svg", SignalCodeIcons::class.java)
     val ModeModel: Icon = IconLoader.getIcon("/icons/mode-model.svg", SignalCodeIcons::class.java)
     val Context: Icon = IconLoader.getIcon("/icons/context.svg", SignalCodeIcons::class.java)
     val Target: Icon = IconLoader.getIcon("/icons/target.svg", SignalCodeIcons::class.java)
