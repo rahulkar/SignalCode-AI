@@ -29,7 +29,8 @@ class BackendClient(
                 val detail = extractError(response.body())
                 throw IllegalStateException("HTTP ${response.statusCode()} from backend: $detail")
             }
-            return gson.fromJson(response.body(), GenerateResponse::class.java)
+            val parsed = gson.fromJson(response.body(), GenerateResponse::class.java)
+            return normalizeGenerateResponse(parsed)
         } catch (error: Exception) {
             throw IllegalStateException("Failed to call $baseUrl/api/generate: ${rootCauseMessage(error)}", error)
         }
@@ -84,6 +85,72 @@ class BackendClient(
     private fun rootCauseMessage(error: Throwable): String {
         val root = generateSequence(error) { it.cause }.lastOrNull() ?: error
         return root.message ?: root::class.java.simpleName
+    }
+
+    private fun normalizeGenerateResponse(response: GenerateResponse): GenerateResponse {
+        val normalizedOperation = normalizeCreateFileContent(response.operation)
+        return if (normalizedOperation == response.operation) response else response.copy(operation = normalizedOperation)
+    }
+
+    private fun normalizeCreateFileContent(operation: AgentOperation): AgentOperation {
+        if (operation.kind != "create_file") {
+            return operation
+        }
+        val rawContent = operation.content ?: return operation
+        val nested = parseNestedJsonObject(rawContent) ?: return operation
+        val nestedKind = readString(nested, "kind")?.trim()?.lowercase()
+        if (nestedKind !in setOf("create_file", "create", "new_file")) {
+            return operation
+        }
+        val nestedTargetPath = readString(nested, "targetFilePath", "target_path", "targetFile", "filePath")
+            ?: return operation
+        if (!samePathLike(nestedTargetPath, operation.targetFilePath)) {
+            return operation
+        }
+        val nestedContent = readString(nested, "content", "replace") ?: return operation
+        return operation.copy(content = nestedContent)
+    }
+
+    private fun parseNestedJsonObject(raw: String): JsonObject? {
+        val stripped = stripOuterMarkdownFences(raw)
+        if (!stripped.trimStart().startsWith("{")) {
+            return null
+        }
+        return runCatching { gson.fromJson(stripped, JsonObject::class.java) }.getOrNull()
+    }
+
+    private fun stripOuterMarkdownFences(raw: String): String {
+        var text = raw.replace("\r\n", "\n").trim()
+        repeat(3) {
+            val wrapped = Regex("^```[^\\n]*\\n?([\\s\\S]*?)\\n?```\\s*$").matchEntire(text) ?: return@repeat
+            text = wrapped.groupValues[1].trim()
+        }
+        return text
+    }
+
+    private fun readString(json: JsonObject, vararg keys: String): String? {
+        keys.forEach { key ->
+            val value = json.get(key)
+            if (value != null && !value.isJsonNull && value.isJsonPrimitive && value.asJsonPrimitive.isString) {
+                val candidate = value.asString.trim()
+                if (candidate.isNotEmpty()) {
+                    return candidate
+                }
+            }
+        }
+        return null
+    }
+
+    private fun samePathLike(left: String, right: String): Boolean {
+        return normalizePathLike(left) == normalizePathLike(right)
+    }
+
+    private fun normalizePathLike(value: String): String {
+        return value
+            .replace("\\", "/")
+            .removePrefix("./")
+            .trim()
+            .lowercase()
     }
 
     private fun sendTelemetry(request: TelemetryRequest) {

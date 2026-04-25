@@ -115,14 +115,18 @@ function normalizeJsonPlan(
   }
 
   const content = cleanText(plan.content) ?? cleanText(plan.replace);
-  if (!content || !targetFilePath) {
+  const unwrapped = unwrapNestedCreateFileContent(content, targetFilePath);
+  const safeContent = unwrapped?.content ?? content;
+  const safeSummary = unwrapped?.summary ?? summary;
+
+  if (!safeContent || !targetFilePath) {
     return null;
   }
   return {
     kind: "create_file",
-    summary,
+    summary: safeSummary,
     targetFilePath,
-    content
+    content: safeContent
   };
 }
 
@@ -237,6 +241,49 @@ function cleanText(value: unknown): string | undefined {
   }
   const normalized = value.replace(/\r\n/g, "\n").trim();
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function unwrapNestedCreateFileContent(
+  content: string | undefined,
+  expectedTargetFilePath: string
+): { content: string; summary?: string } | null {
+  if (!content) {
+    return null;
+  }
+  const nested = parseJsonPlan(content);
+  if (!nested) {
+    return null;
+  }
+
+  const nestedKind = normalizeKind(nested.kind ?? nested.operation, "create_file");
+  if (nestedKind !== "create_file") {
+    return null;
+  }
+
+  const nestedTargetPath = cleanText(
+    nested.targetFilePath ?? nested.target_path ?? nested.targetFile ?? nested.filePath
+  );
+  if (!nestedTargetPath || normalizePathLike(nestedTargetPath) !== normalizePathLike(expectedTargetFilePath)) {
+    return null;
+  }
+
+  const nestedContent = cleanText(nested.content) ?? cleanText(nested.replace);
+  if (!nestedContent) {
+    return null;
+  }
+
+  return {
+    content: nestedContent,
+    summary: cleanText(nested.summary)
+  };
+}
+
+function normalizePathLike(value: string): string {
+  return value
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .trim()
+    .toLowerCase();
 }
 
 function defaultSummary(kind: AgentOperation["kind"], targetFilePath: string): string {

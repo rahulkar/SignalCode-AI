@@ -159,6 +159,40 @@ describe("backend integrity behaviors", () => {
     assert.match(response.body.operation.content, /newHelper/);
   });
 
+  it("unwraps nested create-file JSON accidentally embedded in content", async () => {
+    const app = createApp({
+      generateFn: async () =>
+        JSON.stringify({
+          kind: "create_file",
+          summary: "Create calculator engine",
+          targetFilePath: "src/main/java/com/signalcode/demo/calculator/CalculatorEngine.java",
+          content: JSON.stringify({
+            kind: "create_file",
+            summary: "Create CalculatorEngine class",
+            targetFilePath: "src/main/java/com/signalcode/demo/calculator/CalculatorEngine.java",
+            content: "package com.signalcode.demo.calculator;\n\npublic class CalculatorEngine {}\n"
+          })
+        })
+    });
+
+    const response = await request(app).post("/api/generate").send({
+      prompt: "create calculator engine",
+      mode: "create_file",
+      context: {
+        filePath: "/tmp/seed.txt",
+        targetFilePath: "src/main/java/com/signalcode/demo/calculator/CalculatorEngine.java",
+        selectionOrCaretSnippet: "",
+        languageId: "java"
+      }
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.operation.kind, "create_file");
+    assert.equal(response.body.operation.targetFilePath, "src/main/java/com/signalcode/demo/calculator/CalculatorEngine.java");
+    assert.match(response.body.operation.content, /public class CalculatorEngine/);
+    assert.doesNotMatch(response.body.operation.content, /"kind"\s*:\s*"create_file"/);
+  });
+
   it("returns usage and cost metadata when available", async () => {
     const app = createApp({
       generateFn: async () => ({
