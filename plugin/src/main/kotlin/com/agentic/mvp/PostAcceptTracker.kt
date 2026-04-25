@@ -1,5 +1,6 @@
 package com.signalcode.mvp
 
+import java.nio.file.Paths
 import java.util.concurrent.ConcurrentHashMap
 
 data class PostAcceptEmission(
@@ -24,20 +25,22 @@ object PostAcceptTracker {
     private const val ACTIVE_WINDOW_MS = 30 * 60 * 1000L
 
     fun registerAccepted(taskId: String, acceptedDiffId: String, filePath: String, acceptedText: String) {
-        statesByFilePath[filePath] = State(
+        val normalizedFilePath = normalizeFilePath(filePath)
+        statesByFilePath[normalizedFilePath] = State(
             taskId = taskId,
             acceptedDiffId = acceptedDiffId,
             acceptedAtMs = System.currentTimeMillis(),
-            filePath = filePath,
+            filePath = normalizedFilePath,
             acceptedText = acceptedText
         )
     }
 
     fun onDocumentEdited(filePath: String, currentText: String): PostAcceptEmission? {
-        val state = statesByFilePath[filePath] ?: return null
+        val normalizedFilePath = normalizeFilePath(filePath)
+        val state = statesByFilePath[normalizedFilePath] ?: return null
         val now = System.currentTimeMillis()
         if (now - state.acceptedAtMs > ACTIVE_WINDOW_MS) {
-            statesByFilePath.remove(filePath)
+            statesByFilePath.remove(normalizedFilePath)
             return null
         }
 
@@ -55,7 +58,7 @@ object PostAcceptTracker {
         val meta = mapOf(
             "source" to "post-accept",
             "activityType" to "post_accept_edit",
-            "filePath" to filePath,
+            "filePath" to normalizedFilePath,
             "acceptedDiffId" to state.acceptedDiffId,
             "editsAfterAccept" to state.editCount,
             "secondsSinceAccept" to ((now - state.acceptedAtMs) / 1000.0),
@@ -76,5 +79,11 @@ object PostAcceptTracker {
     private fun lineCount(text: String): Int {
         if (text.isEmpty()) return 0
         return text.count { it == '\n' } + 1
+    }
+
+    private fun normalizeFilePath(filePath: String): String {
+        val trimmed = filePath.trim()
+        val normalized = runCatching { Paths.get(trimmed).normalize().toString() }.getOrDefault(trimmed)
+        return normalized.replace('\\', '/')
     }
 }

@@ -18,19 +18,24 @@ data class ApplyResult(
 )
 
 object AgentOperationApplier {
-    fun apply(project: Project, operation: AgentOperation, currentFilePath: String): ApplyResult {
+    fun apply(
+        project: Project,
+        operation: AgentOperation,
+        currentFilePath: String,
+        openInEditor: Boolean = true
+    ): ApplyResult {
         val resolvedTarget = resolveTargetPath(project, operation.targetFilePath, currentFilePath)
             ?: return ApplyResult(false, "Target path is outside the project.", operation.targetFilePath)
 
         return when (operation.kind) {
-            "replace_range" -> replaceRange(project, resolvedTarget, operation)
-            "insert_after" -> insertAfter(project, resolvedTarget, operation)
-            "create_file" -> createFile(project, resolvedTarget, operation)
+            "replace_range" -> replaceRange(project, resolvedTarget, operation, openInEditor)
+            "insert_after" -> insertAfter(project, resolvedTarget, operation, openInEditor)
+            "create_file" -> createFile(project, resolvedTarget, operation, openInEditor)
             else -> ApplyResult(false, "Unsupported operation '${operation.kind}'.", operation.targetFilePath)
         }
     }
 
-    private fun replaceRange(project: Project, target: Path, operation: AgentOperation): ApplyResult {
+    private fun replaceRange(project: Project, target: Path, operation: AgentOperation, openInEditor: Boolean): ApplyResult {
         val search = operation.search ?: return ApplyResult(false, "Missing search block.", target.toString())
         val replace = operation.replace ?: return ApplyResult(false, "Missing replacement block.", target.toString())
         if (!Files.exists(target)) {
@@ -47,11 +52,11 @@ object AgentOperationApplier {
             append(replace)
             append(original, start + search.length, original.length)
         }
-        saveText(project, target, updated)
+        saveText(project, target, updated, openInEditor)
         return ApplyResult(true, "Updated ${target.fileName}", target.toString())
     }
 
-    private fun insertAfter(project: Project, target: Path, operation: AgentOperation): ApplyResult {
+    private fun insertAfter(project: Project, target: Path, operation: AgentOperation, openInEditor: Boolean): ApplyResult {
         val anchor = operation.anchor ?: return ApplyResult(false, "Missing insertion anchor.", target.toString())
         val content = operation.content ?: return ApplyResult(false, "Missing inserted content.", target.toString())
         if (!Files.exists(target)) {
@@ -75,11 +80,11 @@ object AgentOperationApplier {
             append(content)
             append(original, insertOffset, original.length)
         }
-        saveText(project, target, updated)
+        saveText(project, target, updated, openInEditor)
         return ApplyResult(true, "Added code to ${target.fileName}", target.toString())
     }
 
-    private fun createFile(project: Project, target: Path, operation: AgentOperation): ApplyResult {
+    private fun createFile(project: Project, target: Path, operation: AgentOperation, openInEditor: Boolean): ApplyResult {
         val content = operation.content ?: return ApplyResult(false, "Missing file contents.", target.toString())
         if (Files.exists(target)) {
             return ApplyResult(false, "Target file already exists.", target.toString())
@@ -87,11 +92,18 @@ object AgentOperationApplier {
 
         Files.createDirectories(target.parent ?: target.toAbsolutePath().parent)
         Files.writeString(target, content)
-        refreshAndOpen(project, target)
+        if (openInEditor) {
+            refreshAndOpen(project, target)
+        }
         return ApplyResult(true, "Created ${target.fileName}", target.toString())
     }
 
-    private fun saveText(project: Project, target: Path, updated: String) {
+    private fun saveText(project: Project, target: Path, updated: String, openInEditor: Boolean) {
+        if (!openInEditor) {
+            Files.writeString(target, updated)
+            return
+        }
+
         val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(target)
         val document = virtualFile?.let { FileDocumentManager.getInstance().getDocument(it) }
         if (document != null) {

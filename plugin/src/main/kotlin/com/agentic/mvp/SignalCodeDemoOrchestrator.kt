@@ -1,14 +1,16 @@
 package com.signalcode.mvp
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
@@ -19,41 +21,87 @@ data class SignalCodeDemoSummary(
     val touchedFiles: List<String>
 )
 
+sealed interface DemoProgressEvent {
+    data class RunPhase(val message: String) : DemoProgressEvent
+    data class RunInitialized(val totalSteps: Int, val stepTitles: List<String>) : DemoProgressEvent
+    data class StepStarted(val index: Int, val total: Int, val title: String) : DemoProgressEvent
+    data class StepPhase(
+        val index: Int,
+        val total: Int,
+        val title: String,
+        val phase: String,
+        val detail: String
+    ) : DemoProgressEvent
+    data class StepCompleted(val index: Int, val total: Int, val title: String) : DemoProgressEvent
+    data class StepFailed(val index: Int, val total: Int, val title: String, val reason: String) : DemoProgressEvent
+    data class RunCompleted(val totalSteps: Int) : DemoProgressEvent
+}
+
 class SignalCodeDemoOrchestrator(
     private val project: Project,
     private val model: String,
     private val backendClient: BackendClient = BackendClient("http://localhost:3001"),
-    private val log: (String) -> Unit
+    private val log: (String) -> Unit,
+    private val progress: (DemoProgressEvent) -> Unit = {}
 ) {
     suspend fun run(): SignalCodeDemoSummary {
         val projectRoot = project.basePath?.let { Paths.get(it).normalize() }
             ?: throw IllegalStateException("Open a local IntelliJ project folder before running demo mode.")
 
         val steps = buildDemoSteps()
-        ensureDemoWorkspaceReady(projectRoot, steps)
+        progress(DemoProgressEvent.RunInitialized(steps.size, steps.map { it.title }))
+        progress(DemoProgressEvent.RunPhase("Checking workspace preflight..."))
+        log("Checking workspace preflight...")
+        val workspaceState = ensureDemoWorkspaceReady(projectRoot, steps)
 
         val touchedFiles = linkedSetOf<String>()
         val seedPath = projectRoot.resolve(".signalcode-demo-seed.txt")
 
         log("Using live model '$model'.")
         log("Generating files inside $projectRoot.")
-        log("This run expects an otherwise empty folder so the dashboard tells a clean from-zero story.")
+        if (workspaceState.visibleRootEntries.isEmpty()) {
+            log("Workspace preflight passed: folder is empty.")
+        } else {
+            val preview = workspaceState.visibleRootEntries.take(6).joinToString(", ")
+            val suffix = if (workspaceState.visibleRootEntries.size > 6) {
+                ", +${workspaceState.visibleRootEntries.size - 6} more"
+            } else {
+                ""
+            }
+            log("Workspace preflight passed: folder is not empty ($preview$suffix).")
+        }
+        log("Demo mode will only touch calculator demo files and ignore unrelated project files.")
 
         steps.forEachIndexed { index, step ->
-            when (step) {
-                is DemoLlmStep -> {
-                    log("[${index + 1}/${steps.size}] ${step.title}")
-                    val result = executeLlmStep(projectRoot, seedPath, step)
-                    touchedFiles += relativizeForLog(projectRoot, result.targetFilePath)
-                    log("Accepted LLM output for ${relativizeForLog(projectRoot, result.targetFilePath)}.")
-                }
+            val stepIndex = index + 1
+            progress(DemoProgressEvent.StepStarted(stepIndex, steps.size, step.title))
+            try {
+                when (step) {
+                    is DemoLlmStep -> {
+                        log("[${stepIndex}/${steps.size}] ${step.title}")
+                        val result = executeLlmStep(projectRoot, seedPath, step, stepIndex, steps.size)
+                        touchedFiles += relativizeForLog(projectRoot, result.targetFilePath)
+                        log("Accepted LLM output for ${relativizeForLog(projectRoot, result.targetFilePath)}.")
+                    }
 
-                is DemoManualEditStep -> {
-                    log("[${index + 1}/${steps.size}] ${step.title}")
-                    executeManualEditStep(projectRoot, step)
-                    touchedFiles += step.relativePath
-                    log("Applied local follow-up edit in ${step.relativePath}.")
+                    is DemoManualEditStep -> {
+                        log("[${stepIndex}/${steps.size}] ${step.title}")
+                        executeManualEditStep(projectRoot, step, stepIndex, steps.size)
+                        touchedFiles += step.relativePath
+                        log("Applied local follow-up edit in ${step.relativePath}.")
+                    }
                 }
+                progress(DemoProgressEvent.StepCompleted(stepIndex, steps.size, step.title))
+            } catch (error: Throwable) {
+                progress(
+                    DemoProgressEvent.StepFailed(
+                        index = stepIndex,
+                        total = steps.size,
+                        title = step.title,
+                        reason = error.message ?: error::class.java.simpleName
+                    )
+                )
+                throw error
             }
 
             if (index < steps.lastIndex) {
@@ -62,6 +110,7 @@ class SignalCodeDemoOrchestrator(
         }
 
         log("Demo run finished. Open the Telemetry Command Center to review the accepted tasks, IDE activity, and post-accept edits.")
+        progress(DemoProgressEvent.RunCompleted(steps.size))
         return SignalCodeDemoSummary(
             completedSteps = steps.size,
             touchedFiles = touchedFiles.toList()
@@ -71,8 +120,20 @@ class SignalCodeDemoOrchestrator(
     private suspend fun executeLlmStep(
         projectRoot: Path,
         seedPath: Path,
-        step: DemoLlmStep
+        step: DemoLlmStep,
+        stepIndex: Int,
+        totalSteps: Int
     ): ApplyResult {
+        progress(
+            DemoProgressEvent.StepPhase(
+                stepIndex,
+                totalSteps,
+                step.title,
+                "prepare",
+                "Building request context and prompt payload."
+            )
+        )
+        log("Preparing request context for ${step.primaryFileForLog()}...")
         val contextFilePath = resolveContextFile(projectRoot, seedPath, step)
         val selectionSnippet = buildSelectionSnippet(projectRoot, step)
         val request = GenerateRequest(
@@ -88,8 +149,20 @@ class SignalCodeDemoOrchestrator(
             )
         )
 
+        progress(
+            DemoProgressEvent.StepPhase(
+                stepIndex,
+                totalSteps,
+                step.title,
+                "generate",
+                "Calling backend /api/generate."
+            )
+        )
         log("Prompting the live model for ${step.primaryFileForLog()}...")
-        val response = withContext(Dispatchers.IO) { backendClient.generate(request) }
+        val response = runWithTimeout("Model generation for ${step.primaryFileForLog()}", GENERATE_TIMEOUT_MS) {
+            withContext(Dispatchers.IO) { backendClient.generate(request) }
+        }
+        log("Received backend response for ${step.primaryFileForLog()} (task ${response.task_id}, operation ${response.operation.kind}).")
         if (response.model != model) {
             log("Model fallback applied by backend: requested '$model', used '${response.model}'.")
         }
@@ -97,6 +170,15 @@ class SignalCodeDemoOrchestrator(
         val operation = response.operation
         val previewMetrics = buildPreviewMetrics(projectRoot, contextFilePath, operation)
         val baseMeta = buildDemoMeta(step, contextFilePath, selectionSnippet.length, operation, response.usage)
+        progress(
+            DemoProgressEvent.StepPhase(
+                stepIndex,
+                totalSteps,
+                step.title,
+                "telemetry",
+                "Submitting DIFF_RENDERED telemetry."
+            )
+        )
         emitTelemetry(
             TelemetryRequest(
                 task_id = response.task_id,
@@ -108,10 +190,36 @@ class SignalCodeDemoOrchestrator(
             )
         )
 
-        val applyResult = withContext(Dispatchers.IO) {
-            AgentOperationApplier.apply(project, operation, contextFilePath.toString())
+        progress(
+            DemoProgressEvent.StepPhase(
+                stepIndex,
+                totalSteps,
+                step.title,
+                "apply",
+                "Applying generated operation in IntelliJ editor."
+            )
+        )
+        log("Applying operation '${operation.kind}' to ${operation.targetFilePath}...")
+        val applyResult = runWithTimeout("Applying operation for ${step.primaryFileForLog()}", APPLY_TIMEOUT_MS) {
+            withContext(Dispatchers.IO) {
+                AgentOperationApplier.apply(
+                    project = project,
+                    operation = operation,
+                    currentFilePath = contextFilePath.toString(),
+                    openInEditor = false
+                )
+            }
         }
         if (!applyResult.success) {
+            progress(
+                DemoProgressEvent.StepPhase(
+                    stepIndex,
+                    totalSteps,
+                    step.title,
+                    "telemetry",
+                    "Submitting REJECTED telemetry."
+                )
+            )
             emitTelemetry(
                 TelemetryRequest(
                     task_id = response.task_id,
@@ -126,7 +234,17 @@ class SignalCodeDemoOrchestrator(
             )
             throw IllegalStateException("Failed to apply generated change for ${step.primaryFileForLog()}: ${applyResult.message}")
         }
+        log("Apply succeeded for ${relativizeForLog(projectRoot, applyResult.targetFilePath)}.")
 
+        progress(
+            DemoProgressEvent.StepPhase(
+                stepIndex,
+                totalSteps,
+                step.title,
+                "track",
+                "Capturing accepted state for post-accept tracking."
+            )
+        )
         val acceptedText = readAcceptedText(projectRoot, contextFilePath, applyResult.targetFilePath, operation)
             ?: throw IllegalStateException("Generated change for ${step.primaryFileForLog()} applied, but the resulting file could not be read.")
         PostAcceptTracker.registerAccepted(
@@ -137,6 +255,15 @@ class SignalCodeDemoOrchestrator(
         )
 
         val acceptedMetrics = DemoDocumentMetrics.fromText(acceptedText)
+        progress(
+            DemoProgressEvent.StepPhase(
+                stepIndex,
+                totalSteps,
+                step.title,
+                "telemetry",
+                "Submitting ACCEPTED telemetry."
+            )
+        )
         emitTelemetry(
             TelemetryRequest(
                 task_id = response.task_id,
@@ -151,7 +278,21 @@ class SignalCodeDemoOrchestrator(
         return applyResult
     }
 
-    private suspend fun executeManualEditStep(projectRoot: Path, step: DemoManualEditStep) {
+    private suspend fun executeManualEditStep(
+        projectRoot: Path,
+        step: DemoManualEditStep,
+        stepIndex: Int,
+        totalSteps: Int
+    ) {
+        progress(
+            DemoProgressEvent.StepPhase(
+                stepIndex,
+                totalSteps,
+                step.title,
+                "manual-edit",
+                "Applying local follow-up edit through IntelliJ document APIs."
+            )
+        )
         val target = projectRoot.resolve(step.relativePath).normalize()
         if (!Files.exists(target)) {
             throw IllegalStateException("Expected ${step.relativePath} to exist before applying the local follow-up edit.")
@@ -280,17 +421,35 @@ class SignalCodeDemoOrchestrator(
     }
 
     private suspend fun emitTelemetry(request: TelemetryRequest) {
-        withContext(Dispatchers.IO) {
-            backendClient.telemetryOrThrow(request)
+        val eventName = request.event.name
+        try {
+            runWithTimeout("Telemetry $eventName", TELEMETRY_TIMEOUT_MS) {
+                withContext(Dispatchers.IO) {
+                    backendClient.telemetryOrThrow(request)
+                }
+            }
+        } catch (error: Throwable) {
+            log(
+                "Telemetry $eventName failed for task ${request.task_id}: " +
+                    "${error.message ?: error::class.java.simpleName}. Continuing demo."
+            )
+        }
+    }
+
+    private suspend fun <T> runWithTimeout(label: String, timeoutMs: Long, block: suspend () -> T): T {
+        return try {
+            withTimeout(timeoutMs) { block() }
+        } catch (_: TimeoutCancellationException) {
+            throw IllegalStateException("$label timed out after ${timeoutMs / 1000}s.")
         }
     }
 
     private fun writeTextThroughDocument(target: Path, updatedText: String) {
         var wroteWithDocument = false
-        ApplicationManager.getApplication().invokeAndWait {
+        ApplicationManager.getApplication().invokeAndWait({
             val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(target)
+                ?: LocalFileSystem.getInstance().refreshAndFindFileByIoFile(target.toFile())
             if (virtualFile != null) {
-                FileEditorManager.getInstance(project).openTextEditor(OpenFileDescriptor(project, virtualFile), true)
                 val document = FileDocumentManager.getInstance().getDocument(virtualFile)
                 if (document != null) {
                     WriteCommandAction.runWriteCommandAction(project) {
@@ -300,7 +459,7 @@ class SignalCodeDemoOrchestrator(
                     wroteWithDocument = true
                 }
             }
-        }
+        }, ModalityState.any())
 
         if (wroteWithDocument) {
             return
@@ -310,8 +469,17 @@ class SignalCodeDemoOrchestrator(
         LocalFileSystem.getInstance().refreshAndFindFileByNioFile(target)
     }
 
-    private fun ensureDemoWorkspaceReady(projectRoot: Path, steps: List<DemoStep>) {
-        ensureProjectLooksEmpty(projectRoot)
+    private fun ensureDemoWorkspaceReady(projectRoot: Path, steps: List<DemoStep>): DemoWorkspaceState {
+        val visibleRootEntries = mutableListOf<String>()
+        Files.newDirectoryStream(projectRoot).use { entries ->
+            entries.forEach { entry ->
+                val name = entry.fileName?.toString().orEmpty()
+                if (name.isNotBlank() && !name.startsWith(".")) {
+                    visibleRootEntries += name
+                }
+            }
+        }
+        visibleRootEntries.sort()
 
         val collisions = steps
             .mapNotNull {
@@ -328,24 +496,7 @@ class SignalCodeDemoOrchestrator(
             val names = collisions.joinToString(", ") { projectRoot.relativize(it).toString() }
             throw IllegalStateException("Demo mode expects a clean project. Remove these files first: $names")
         }
-    }
-
-    private fun ensureProjectLooksEmpty(projectRoot: Path) {
-        val unexpectedEntries = mutableListOf<String>()
-        Files.newDirectoryStream(projectRoot).use { entries ->
-            entries.forEach { entry ->
-                val name = entry.fileName?.toString().orEmpty()
-                if (name.isNotBlank() && !name.startsWith(".")) {
-                    unexpectedEntries += name
-                }
-            }
-        }
-
-        if (unexpectedEntries.isNotEmpty()) {
-            throw IllegalStateException(
-                "Demo mode expects an empty folder. Open a clean IntelliJ directory first. Found: ${unexpectedEntries.joinToString(", ")}"
-            )
-        }
+        return DemoWorkspaceState(visibleRootEntries)
     }
 
     private fun relativizeForLog(projectRoot: Path, rawPath: String): String {
@@ -512,8 +663,15 @@ class SignalCodeDemoOrchestrator(
         val transform: (String) -> String
     ) : DemoStep
 
+    private data class DemoWorkspaceState(
+        val visibleRootEntries: List<String>
+    )
+
     companion object {
         private const val MAX_SELECTION_SNIPPET_CHARS = 24_000
+        private const val GENERATE_TIMEOUT_MS = 140_000L
+        private const val APPLY_TIMEOUT_MS = 120_000L
+        private const val TELEMETRY_TIMEOUT_MS = 12_000L
     }
 }
 

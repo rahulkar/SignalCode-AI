@@ -3,10 +3,13 @@ package com.signalcode.mvp
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.Messages
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +23,7 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.JProgressBar
 import javax.swing.JScrollPane
 import javax.swing.JTextArea
 import javax.swing.SwingConstants
@@ -36,11 +40,28 @@ class SignalCodeDemoDialog(
         rows = 16
         border = JBUI.Borders.empty(10)
     }
+    private val liveProgressLabel = JLabel(
+        "Step-by-step status appears here during the run.",
+        SignalCodeIcons.Inspect,
+        SwingConstants.LEFT
+    )
+    private val liveProgressBar = JProgressBar(0, 100).apply {
+        isStringPainted = true
+        value = 0
+        string = "Idle"
+    }
+    private val liveProgressArea = JTextArea().apply {
+        isEditable = false
+        lineWrap = true
+        wrapStyleWord = true
+        rows = 9
+        border = JBUI.Borders.empty(10)
+    }
     private val startDemoButton = JButton("Run live demo").apply {
         icon = SignalCodeIcons.Demo
     }
     private val statusLabel = JLabel(
-        "Ready to generate a real Java calculator demo in an empty IntelliJ folder with $selectedModel.",
+        "Ready to generate a real Java calculator demo in the current IntelliJ folder with $selectedModel.",
         SignalCodeIcons.ModeModel,
         SwingConstants.LEFT
     )
@@ -52,7 +73,7 @@ class SignalCodeDemoDialog(
         init()
         bindActions()
         appendLog("This mode uses the live backend, real model calls, and real telemetry.")
-        appendLog("Open an empty IntelliJ folder first, then make sure the backend, LiteLLM, and Telemetry Command Center are already running.")
+        appendLog("Open a local IntelliJ folder, then make sure the backend, LiteLLM, and Telemetry Command Center are already running.")
     }
 
     override fun createCenterPanel(): JComponent {
@@ -72,7 +93,7 @@ class SignalCodeDemoDialog(
                         BorderLayout.NORTH
                     )
                     add(
-                        JLabel("Autonomously builds a Java calculator MVP in the current empty IntelliJ project and streams real telemetry to the dashboard."),
+                        JLabel("Autonomously builds a Java calculator MVP in the current IntelliJ project and streams real telemetry to the dashboard."),
                         BorderLayout.SOUTH
                     )
                 },
@@ -114,36 +135,50 @@ class SignalCodeDemoDialog(
             isRunning = true
             startDemoButton.isEnabled = false
             statusLabel.text = "Running live demo with $selectedModel..."
+            resetLiveProgress()
             appendLog("Starting live demo run in ${projectRef.basePath ?: "unknown project root"}")
 
             scope.launch {
                 val orchestrator = SignalCodeDemoOrchestrator(
                     project = projectRef,
-                    model = selectedModel
-                ) { message ->
-                    appendLog(message)
-                }
+                    model = selectedModel,
+                    log = { message -> appendLog(message) },
+                    progress = { event -> onProgressEvent(event) }
+                )
 
-                runCatching { orchestrator.run() }
-                    .onSuccess { summary ->
-                        ApplicationManager.getApplication().invokeLater {
-                            isRunning = false
-                            startDemoButton.isEnabled = true
-                            statusLabel.text = "Live demo completed: ${summary.completedSteps} steps across ${summary.touchedFiles.size} files."
-                            notify(
-                                "Live demo completed across ${summary.touchedFiles.size} files. Refresh the Telemetry Command Center to view the results.",
-                                NotificationType.INFORMATION
-                            )
-                        }
+                try {
+                    val summary = orchestrator.run()
+                    runOnDialogUi {
+                        isRunning = false
+                        startDemoButton.isEnabled = true
+                        statusLabel.text = "Live demo completed: ${summary.completedSteps} steps across ${summary.touchedFiles.size} files."
+                        notify(
+                            "Live demo completed across ${summary.touchedFiles.size} files. Refresh the Telemetry Command Center to view the results.",
+                            NotificationType.INFORMATION
+                        )
                     }
-                    .onFailure { error ->
-                        ApplicationManager.getApplication().invokeLater {
-                            isRunning = false
-                            startDemoButton.isEnabled = true
-                            statusLabel.text = "Demo failed: ${error.message ?: error::class.java.simpleName}"
-                            notify("Live demo failed: ${error.message ?: error::class.java.simpleName}", NotificationType.ERROR)
-                        }
+                } catch (_: CancellationException) {
+                    appendLog("Live demo run cancelled.")
+                    runOnDialogUi {
+                        isRunning = false
+                        startDemoButton.isEnabled = true
+                        statusLabel.text = "Live demo cancelled."
                     }
+                } catch (error: Throwable) {
+                    val message = error.message ?: error::class.java.simpleName
+                    appendLog("Live demo failed: $message")
+                    runOnDialogUi {
+                        isRunning = false
+                        startDemoButton.isEnabled = true
+                        statusLabel.text = "Demo failed: $message"
+                        notify("Live demo failed: $message", NotificationType.ERROR)
+                        Messages.showErrorDialog(
+                            projectRef,
+                            "Live demo failed.\n$message\n\nSee the Execution log panel for step details.",
+                            "SignalCode Demo Mode"
+                        )
+                    }
+                }
             }
         }
     }
@@ -151,7 +186,7 @@ class SignalCodeDemoDialog(
     private fun buildPlanPanel(): JPanel {
         val body = JTextArea(
             """
-            1. Confirm the current IntelliJ folder is effectively empty so the executive walkthrough starts from zero.
+            1. Validate the current IntelliJ folder and ensure demo target files do not already exist.
             2. Create a small Java calculator project structure in that folder.
             3. Use the actual generate API and selected model to create multiple production-style files.
             4. Apply one real patch to an existing file so the run includes both new-file generation and update-style work.
@@ -170,7 +205,21 @@ class SignalCodeDemoDialog(
             add(body, BorderLayout.NORTH)
             add(
                 JPanel(BorderLayout(0, 8)).apply {
-                    add(statusLabel, BorderLayout.NORTH)
+                    add(
+                        JPanel(BorderLayout(0, 6)).apply {
+                            add(statusLabel, BorderLayout.NORTH)
+                            add(liveProgressLabel, BorderLayout.CENTER)
+                            add(liveProgressBar, BorderLayout.SOUTH)
+                        },
+                        BorderLayout.NORTH
+                    )
+                    add(
+                        JScrollPane(liveProgressArea).apply {
+                            preferredSize = Dimension(760, 170)
+                            border = BorderFactory.createLineBorder(UIUtil.getBoundsColor())
+                        },
+                        BorderLayout.CENTER
+                    )
                     add(
                         JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
                             add(startDemoButton)
@@ -186,7 +235,7 @@ class SignalCodeDemoDialog(
     private fun buildLogPanel(): JPanel {
         return JPanel(BorderLayout(0, 8)).apply {
             add(
-                JLabel("The log below updates as each LLM step and local follow-up edit completes."),
+                JLabel("The log below updates as each LLM phase (generate, apply, telemetry) and local follow-up edit completes."),
                 BorderLayout.NORTH
             )
             add(
@@ -239,13 +288,99 @@ class SignalCodeDemoDialog(
     }
 
     private fun appendLog(message: String) {
-        ApplicationManager.getApplication().invokeLater {
+        runOnDialogUi {
             if (logArea.text.isNotBlank()) {
                 logArea.append("\n")
             }
             logArea.append(message)
             logArea.caretPosition = logArea.document.length
         }
+    }
+
+    private fun resetLiveProgress() {
+        runOnDialogUi {
+            liveProgressLabel.text = "Initializing run..."
+            liveProgressBar.value = 0
+            liveProgressBar.string = "Starting"
+            liveProgressArea.text = ""
+        }
+    }
+
+    private fun onProgressEvent(event: DemoProgressEvent) {
+        runOnDialogUi {
+            when (event) {
+                is DemoProgressEvent.RunPhase -> {
+                    liveProgressLabel.text = event.message
+                    appendLiveProgressLine("Run: ${event.message}")
+                }
+
+                is DemoProgressEvent.RunInitialized -> {
+                    liveProgressBar.value = 0
+                    liveProgressBar.string = "0/${event.totalSteps} steps"
+                    liveProgressLabel.text = "Run initialized with ${event.totalSteps} steps."
+                    appendLiveProgressLine("Run initialized with ${event.totalSteps} steps.")
+                    event.stepTitles.forEachIndexed { idx, title ->
+                        appendLiveProgressLine("  ${idx + 1}. $title")
+                    }
+                }
+
+                is DemoProgressEvent.StepStarted -> {
+                    setProgressPercent(event.index - 1, event.total)
+                    liveProgressBar.string = "${event.index - 1}/${event.total} steps complete"
+                    liveProgressLabel.text = "[${event.index}/${event.total}] ${event.title}"
+                    appendLiveProgressLine("[${event.index}/${event.total}] Started ${event.title}")
+                }
+
+                is DemoProgressEvent.StepPhase -> {
+                    liveProgressLabel.text = "[${event.index}/${event.total}] ${event.title}: ${event.phase}"
+                    appendLiveProgressLine("  - ${event.phase}: ${event.detail}")
+                }
+
+                is DemoProgressEvent.StepCompleted -> {
+                    setProgressPercent(event.index, event.total)
+                    liveProgressBar.string = "${event.index}/${event.total} steps complete"
+                    liveProgressLabel.text = "[${event.index}/${event.total}] Completed ${event.title}"
+                    appendLiveProgressLine("[${event.index}/${event.total}] Completed ${event.title}")
+                }
+
+                is DemoProgressEvent.StepFailed -> {
+                    liveProgressLabel.text = "[${event.index}/${event.total}] Failed ${event.title}"
+                    appendLiveProgressLine("[${event.index}/${event.total}] Failed ${event.title}: ${event.reason}")
+                }
+
+                is DemoProgressEvent.RunCompleted -> {
+                    liveProgressBar.value = 100
+                    liveProgressBar.string = "${event.totalSteps}/${event.totalSteps} steps complete"
+                    liveProgressLabel.text = "Run completed."
+                    appendLiveProgressLine("Run completed successfully.")
+                }
+            }
+        }
+    }
+
+    private fun appendLiveProgressLine(message: String) {
+        if (liveProgressArea.text.isNotBlank()) {
+            liveProgressArea.append("\n")
+        }
+        liveProgressArea.append(message)
+        liveProgressArea.caretPosition = liveProgressArea.document.length
+    }
+
+    private fun setProgressPercent(completedSteps: Int, totalSteps: Int) {
+        val total = totalSteps.coerceAtLeast(1)
+        val safeCompleted = completedSteps.coerceIn(0, total)
+        liveProgressBar.value = (safeCompleted * 100) / total
+    }
+
+    private fun runOnDialogUi(action: () -> Unit) {
+        val application = ApplicationManager.getApplication()
+        if (application.isDispatchThread) {
+            action()
+            return
+        }
+
+        // Keep progress and log updates flowing while this modal dialog remains open.
+        application.invokeLater({ action() }, ModalityState.any())
     }
 
     private fun notify(content: String, type: NotificationType) {

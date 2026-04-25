@@ -77,6 +77,7 @@ class SignalCodeAgentDialog(
     }
     private val demoModeButton = JButton("Run live demo").apply {
         icon = SignalCodeIcons.Demo
+        toolTipText = "Launch the executive demo flow with the currently selected model."
     }
 
     var submission: AgentDialogSubmission? = null
@@ -114,9 +115,20 @@ class SignalCodeAgentDialog(
                 BorderLayout.WEST
             )
             add(
-                JPanel(BorderLayout(0, 4)).apply {
-                    add(statusLabel, BorderLayout.NORTH)
-                    add(submissionButtonLabel, BorderLayout.SOUTH)
+                JPanel(BorderLayout(0, 8)).apply {
+                    add(
+                        JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                            add(demoModeButton)
+                        },
+                        BorderLayout.NORTH
+                    )
+                    add(
+                        JPanel(BorderLayout(0, 4)).apply {
+                            add(statusLabel, BorderLayout.NORTH)
+                            add(submissionButtonLabel, BorderLayout.SOUTH)
+                        },
+                        BorderLayout.SOUTH
+                    )
                 },
                 BorderLayout.EAST
             )
@@ -127,8 +139,6 @@ class SignalCodeAgentDialog(
             add(cardPanel("Mode & model", SignalCodeIcons.ModeModel, buildModeAndModelPanel()))
             add(spacer())
             add(cardPanel("Context", SignalCodeIcons.Context, buildContextPanel()))
-            add(spacer())
-            add(cardPanel("Demo mode", SignalCodeIcons.Demo, buildDemoPanel()))
             add(spacer())
             add(cardPanel("Target", SignalCodeIcons.Target, buildTargetPanel()))
             add(spacer())
@@ -322,23 +332,6 @@ class SignalCodeAgentDialog(
         }
     }
 
-    private fun buildDemoPanel(): JPanel {
-        return JPanel(BorderLayout(0, 10)).apply {
-            add(
-                bodyText(
-                    "Run a real end-to-end demo in an empty IntelliJ project. SignalCode will call the live model, create a Java calculator app across several files, patch existing generated code, and stream telemetry into the dashboard."
-                ),
-                BorderLayout.NORTH
-            )
-            add(
-                JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-                    add(demoModeButton)
-                },
-                BorderLayout.CENTER
-            )
-        }
-    }
-
     private fun buildTargetPanel(): JPanel {
         targetRow.add(JLabel("File path"), BorderLayout.WEST)
         targetRow.add(targetPathField, BorderLayout.CENTER)
@@ -394,16 +387,6 @@ class SignalCodeAgentDialog(
                 BorderLayout.NORTH
             )
             add(content, BorderLayout.CENTER)
-        }
-    }
-
-    private fun bodyText(text: String): JTextArea {
-        return JTextArea(text).apply {
-            isEditable = false
-            isOpaque = false
-            lineWrap = true
-            wrapStyleWord = true
-            border = BorderFactory.createEmptyBorder()
         }
     }
 
